@@ -1,0 +1,83 @@
+import { onMounted, onUnmounted } from 'vue'
+import uxState, { setTool, clearSelection } from '../stores/uxState.js'
+import dataState, { removeElement, addElement } from '../stores/dataState.js'
+import { removeProxy, seekToFrame, play, pause } from '../stores/animationStore.js'
+import { generateId } from '../utils/idgen.js'
+import { undo, redo } from './useHistory.js'
+import { saveProject } from './usePersistence.js'
+
+export function useKeyboardShortcuts() {
+  function deleteSelected() {
+    for (const id of uxState.selectedIds) {
+      removeElement(id)
+      removeProxy(id)
+    }
+    clearSelection()
+  }
+
+  function duplicateSelected() {
+    const newIds = []
+    for (const id of uxState.selectedIds) {
+      const el = dataState.elements[id]
+      if (!el) continue
+      const newEl = {
+        ...el,
+        id: generateId('el'),
+        label: el.label + ' copy',
+        x: (el.x ?? 0) + 20,
+        y: (el.y ?? 0) + 20,
+        cx: el.cx !== undefined ? el.cx + 20 : undefined,
+        cy: el.cy !== undefined ? el.cy + 20 : undefined,
+        x1: el.x1 !== undefined ? el.x1 + 20 : undefined,
+        y1: el.y1 !== undefined ? el.y1 + 20 : undefined,
+        x2: el.x2 !== undefined ? el.x2 + 20 : undefined,
+        y2: el.y2 !== undefined ? el.y2 + 20 : undefined,
+      }
+      // Clean up undefined keys
+      Object.keys(newEl).forEach(k => newEl[k] === undefined && delete newEl[k])
+      addElement(newEl)
+      newIds.push(newEl.id)
+    }
+    uxState.selectedIds = newIds
+  }
+
+  function onKeyDown(e) {
+    // Don't fire shortcuts when typing in inputs or textareas
+    const tag = e.target.tagName.toLowerCase()
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return
+
+    const ctrl = e.ctrlKey || e.metaKey
+
+    if (ctrl && e.key === 'z') { e.preventDefault(); undo(); return }
+    if (ctrl && e.key === 'y') { e.preventDefault(); redo(); return }
+    if (ctrl && e.key === 'd') { e.preventDefault(); duplicateSelected(); return }
+    if (ctrl && e.key === 's') { e.preventDefault(); saveProject(); return }
+
+    switch (e.key) {
+      case 'v': case 'V': setTool('select'); break
+      case 'r': case 'R': setTool('rect'); break
+      case 'e': case 'E': setTool('ellipse'); break
+      case 'l': case 'L': setTool('line'); break
+      case 'a': case 'A': setTool('arrow'); break
+      case 't': case 'T': setTool('text'); break
+      case 'p': case 'P': setTool('path'); break
+      case 'Delete': case 'Backspace': deleteSelected(); break
+      case 'Escape': setTool('select'); clearSelection(); break
+      case ' ':
+        e.preventDefault()
+        uxState.isPlaying ? pause() : play()
+        break
+      case 'ArrowLeft':
+        e.preventDefault()
+        seekToFrame(Math.max(0, Math.round(uxState.currentFrame) - 1))
+        break
+      case 'ArrowRight':
+        e.preventDefault()
+        seekToFrame(Math.min(dataState.project.totalFrames, Math.round(uxState.currentFrame) + 1))
+        break
+    }
+  }
+
+  onMounted(() => window.addEventListener('keydown', onKeyDown))
+  onUnmounted(() => window.removeEventListener('keydown', onKeyDown))
+}
