@@ -1,6 +1,7 @@
 import { reactive, watch } from 'vue'
 
 const STORAGE_KEY = 'diagrammer_ux'
+const SESSION_KEY = 'diagrammer_session'
 
 const defaults = {
   activeTool: 'select',
@@ -11,6 +12,10 @@ const defaults = {
   canvasOffset: { x: 0, y: 0 },
   timelinePanelHeight: 220,
   isLooping: true,
+  grid: { visible: false, spacing: 20, snap: false },
+  pointSnap: false,
+  autoGroupOnSnap: false,
+  sessionBg: '',  // overrides project.background for this tab session
   // transient — not persisted
   isPlaying: false,
   drawState: {
@@ -35,7 +40,19 @@ function loadPersisted() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
     const saved = JSON.parse(raw)
-    const allowed = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping']
+    const allowed = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap']
+    return Object.fromEntries(allowed.filter(k => k in saved).map(k => [k, saved[k]]))
+  } catch {
+    return {}
+  }
+}
+
+function loadSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    if (!raw) return {}
+    const saved = JSON.parse(raw)
+    const allowed = ['sessionBg']
     return Object.fromEntries(allowed.filter(k => k in saved).map(k => [k, saved[k]]))
   } catch {
     return {}
@@ -45,15 +62,26 @@ function loadPersisted() {
 const uxState = reactive({
   ...defaults,
   ...loadPersisted(),
+  ...loadSession(),
 })
 
-const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping']
+const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap']
+const SESSION_KEYS = ['sessionBg']
 
 watch(
   () => PERSIST_KEYS.map(k => uxState[k]),
   () => {
     const toSave = Object.fromEntries(PERSIST_KEYS.map(k => [k, uxState[k]]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
+  },
+  { deep: true }
+)
+
+watch(
+  () => SESSION_KEYS.map(k => uxState[k]),
+  () => {
+    const toSave = Object.fromEntries(SESSION_KEYS.map(k => [k, uxState[k]]))
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(toSave))
   },
   { deep: true }
 )

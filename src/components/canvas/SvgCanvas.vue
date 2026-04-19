@@ -7,7 +7,7 @@
       :height="project.canvasHeight * canvasZoom"
       :viewBox="`0 0 ${project.canvasWidth} ${project.canvasHeight}`"
       :style="{
-        background: project.background,
+        background: effectiveBg,
         cursor: cursorStyle,
         display: 'block',
       }"
@@ -16,6 +16,7 @@
       @mouseup="onMouseUp"
       @mouseleave="onMouseLeave"
       @dblclick="onDblClick"
+      @contextmenu.prevent="onContextMenu"
     >
       <defs>
         <marker id="arrowhead" markerWidth="10" markerHeight="7"
@@ -26,7 +27,24 @@
                 refX="1" refY="3.5" orient="auto-start-reverse" markerUnits="strokeWidth">
           <polygon points="0 0, 10 3.5, 0 7" fill="currentColor" />
         </marker>
+        <pattern
+          id="canvas-grid"
+          :width="grid.spacing" :height="grid.spacing"
+          patternUnits="userSpaceOnUse"
+        >
+          <path
+            :d="`M ${grid.spacing} 0 L 0 0 0 ${grid.spacing}`"
+            fill="none" :stroke="gridColor" stroke-width="0.5"
+          />
+        </pattern>
       </defs>
+
+      <!-- Grid overlay -->
+      <rect
+        v-if="grid.visible"
+        :width="project.canvasWidth" :height="project.canvasHeight"
+        fill="url(#canvas-grid)" pointer-events="none"
+      />
 
       <!-- Elements rendered from GSAP-driven proxies -->
       <ElementRenderer
@@ -59,37 +77,135 @@
         pointer-events="none"
       />
 
+      <!-- Pen tool live preview -->
+      <PenPreview />
+
+      <!-- Snapshot selection rect -->
+      <rect
+        v-if="snapshotRect.active"
+        :x="snapshotRect.x" :y="snapshotRect.y"
+        :width="snapshotRect.width" :height="snapshotRect.height"
+        fill="rgba(255,200,0,0.08)" stroke="#f59e0b"
+        stroke-width="1" stroke-dasharray="5 3"
+        pointer-events="none"
+      />
+
+      <!-- Point snap indicator -->
+      <g v-if="snapIndicator.active" pointer-events="none">
+        <circle :cx="snapIndicator.x" :cy="snapIndicator.y" r="7"
+                fill="none" stroke="#4a90e2" stroke-width="1" opacity="0.9" />
+        <circle :cx="snapIndicator.x" :cy="snapIndicator.y" r="1.5"
+                fill="#4a90e2" opacity="0.9" />
+      </g>
+
       <!-- Text editor overlay -->
       <TextEditor />
     </svg>
+
+    <!-- Context menu (teleports to body, outside SVG) -->
+    <ContextMenu
+      v-if="ctxMenu.visible"
+      :x="ctxMenu.x" :y="ctxMenu.y"
+      @action="handleContextAction"
+      @close="closeContextMenu"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import dataState from '../../stores/dataState.js'
+import {
+  bringToFront, bringForward, sendBackward, sendToBack,
+  flipHorizontal, flipVertical,
+  groupElements, ungroupElements,
+  removeElement,
+} from '../../stores/dataState.js'
 import uxState from '../../stores/uxState.js'
 import { sortedElementProxies } from '../../stores/animationStore.js'
 import { useDrawing } from '../../composables/useDrawing.js'
 import { useSelection, marquee } from '../../composables/useSelection.js'
+import { usePen, penState } from '../../composables/usePen.js'
 import ElementRenderer from './ElementRenderer.vue'
 import SelectionOverlay from './SelectionOverlay.vue'
+import PenPreview from './PenPreview.vue'
+import ContextMenu from './ContextMenu.vue'
 import TextEditor from './TextEditor.vue'
+import { syncProxyToElement, removeProxy } from '../../stores/animationStore.js'
+import { clearSelection } from '../../stores/uxState.js'
+import { snapIndicator } from '../../utils/snapPoints.js'
+import { useSnapshot, snapshotRect } from '../../composables/useSnapshot.js'
 
 const svgRef = ref(null)
+const ctxMenu = reactive({ visible: false, x: 0, y: 0 })
+
+function onContextMenu(event) {
+  if (!selectedIds.value.length) return
+  ctxMenu.x = event.clientX
+  ctxMenu.y = event.clientY
+  ctxMenu.visible = true
+}
+
+function closeContextMenu() { ctxMenu.visible = false }
+
+function handleContextAction(action) {
+  const ids = uxState.selectedIds
+  const primary = ids[0]
+  switch (action) {
+    case 'flipH':        ids.forEach(id => { flipHorizontal(id); syncProxyToElement(id) }); break
+    case 'flipV':        ids.forEach(id => { flipVertical(id);   syncProxyToElement(id) }); break
+    case 'bringToFront': bringToFront(primary); break
+    case 'bringForward': bringForward(primary); break
+    case 'sendBackward': sendBackward(primary); break
+    case 'sendToBack':   sendToBack(primary);   break
+    case 'group':        groupElements(ids);    break
+    case 'ungroup':      ungroupElements(ids);  break
+    case 'delete':
+      ids.forEach(id => { removeElement(id); removeProxy(id) })
+      clearSelection()
+      break
+  }
+}
+
+function onClickOutsideMenu(e) {
+  if (ctxMenu.visible) closeContextMenu()
+}
+
+onMounted(() => document.addEventListener('mousedown', onClickOutsideMenu))
+onUnmounted(() => document.removeEventListener('mousedown', onClickOutsideMenu))
 
 const project = computed(() => dataState.project)
 const canvasZoom = computed(() => uxState.canvasZoom)
 const selectedIds = computed(() => uxState.selectedIds)
 const activeTool = computed(() => uxState.activeTool)
+const grid = computed(() => uxState.grid)
+
+const effectiveBg = computed(() => uxState.sessionBg || project.value.background)
+
+function hexLuminance(hex) {
+  const h = hex.replace('#', '')
+  if (h.length < 6) return 0
+  const r = parseInt(h.slice(0, 2), 16) / 255
+  const g = parseInt(h.slice(2, 4), 16) / 255
+  const b = parseInt(h.slice(4, 6), 16) / 255
+  return 0.299 * r + 0.587 * g + 0.114 * b
+}
+
+const gridColor = computed(() =>
+  hexLuminance(effectiveBg.value) > 0.5
+    ? 'rgba(0,0,0,0.2)'
+    : 'rgba(255,255,255,0.2)'
+)
 
 const { onMouseDown: drawDown, onMouseMove: drawMove, onMouseUp: drawUp, previewElement } = useDrawing()
 const { onMouseDown: selectDown, onMouseMove: selectMove, onMouseUp: selectUp } = useSelection()
+const { onMouseDown: penDown, onMouseMove: penMove, onMouseUp: penUp, onDblClick: penDblClick } = usePen()
+const { onMouseDown: snapDown, onMouseMove: snapMove, onMouseUp: snapUp, onMouseLeave: snapLeave } = useSnapshot(svgRef)
 
 const DRAWING_TOOLS = ['rect', 'ellipse', 'line', 'arrow', 'text', 'path']
 
 const cursorStyle = computed(() => {
-  if (DRAWING_TOOLS.includes(activeTool.value)) return 'crosshair'
+  if (DRAWING_TOOLS.includes(activeTool.value) || activeTool.value === 'pen' || activeTool.value === 'snapshot') return 'crosshair'
   if (uxState.dragState.active) return 'grabbing'
   return 'default'
 })
@@ -108,25 +224,38 @@ function getSvgPoint(event) {
 
 function onMouseDown(event) {
   const pt = getSvgPoint(event)
-  if (DRAWING_TOOLS.includes(activeTool.value)) {
+  if (activeTool.value === 'snapshot') {
+    snapDown(pt)
+  } else if (activeTool.value === 'pen') {
+    penDown(pt)
+  } else if (DRAWING_TOOLS.includes(activeTool.value)) {
     drawDown(pt)
   } else {
-    // Route to selection: pass the native target so it can read data-element-id / data-handle
-    selectDown(pt, event.target)
+    const target = event.target
+    target._shiftKey = event.shiftKey
+    selectDown(pt, target)
   }
 }
 
 function onMouseMove(event) {
   const pt = getSvgPoint(event)
-  if (uxState.drawState.active) {
-    drawMove(pt)
+  if (activeTool.value === 'snapshot' || snapshotRect.active) {
+    snapMove(pt)
+  } else if (activeTool.value === 'pen' || penState.active) {
+    penMove(pt)
+  } else if (uxState.drawState.active) {
+    drawMove(pt, event.shiftKey)
   } else {
-    selectMove(pt)
+    selectMove(pt, event.shiftKey)
   }
 }
 
 function onMouseUp() {
-  if (uxState.drawState.active) {
+  if (snapshotRect.active) {
+    snapUp()
+  } else if (penState.active) {
+    penUp()
+  } else if (uxState.drawState.active) {
     drawUp()
   } else {
     selectUp()
@@ -134,8 +263,10 @@ function onMouseUp() {
 }
 
 function onMouseLeave() {
+  if (snapshotRect.active) snapLeave()
   if (uxState.drawState.active) drawUp()
   if (uxState.dragState.active) selectUp()
+  // Don't cancel pen on mouseleave — user may move back onto canvas
 }
 
 function onCtrlWheel(event) {
@@ -144,6 +275,10 @@ function onCtrlWheel(event) {
 }
 
 function onDblClick(event) {
+  if (activeTool.value === 'pen' || penState.active) {
+    penDblClick()
+    return
+  }
   const elementId = event.target?.dataset?.elementId
   if (elementId && dataState.elements[elementId]?.type === 'text') {
     uxState.editingTextId = elementId

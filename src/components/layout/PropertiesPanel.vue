@@ -1,7 +1,40 @@
 <template>
   <aside class="properties-panel">
     <template v-if="el">
-      <div class="panel-title">{{ el.label ?? el.type }}</div>
+      <!-- Element name -->
+      <section class="prop-section name-section">
+        <input
+          class="name-input"
+          :value="el.label ?? el.type"
+          @change="handleRename($event.target.value)"
+          @keydown.enter="$event.target.blur()"
+          spellcheck="false"
+        />
+        <span v-if="renameWarning" class="rename-warning">{{ renameWarning }}</span>
+      </section>
+
+      <!-- Group name (when element belongs to a group) -->
+      <section v-if="isGrouped && groupInfo" class="prop-section">
+        <div class="prop-row">
+          <label>Group</label>
+          <input
+            type="text"
+            :value="groupInfo.name"
+            @change="handleGroupRename($event.target.value)"
+            @keydown.enter="$event.target.blur()"
+            spellcheck="false"
+          />
+        </div>
+        <span v-if="groupRenameWarning" class="rename-warning">{{ groupRenameWarning }}</span>
+        <div class="prop-row" style="margin-top:2px">
+          <button class="add-kf-btn" style="flex:1" @click="ungroup">Ungroup <kbd>⌘⇧G</kbd></button>
+        </div>
+      </section>
+
+      <!-- Group selection button (multi-select, not yet grouped) -->
+      <section v-else-if="isMultiSelect" class="prop-section">
+        <button class="add-kf-btn" @click="group">Group selection <kbd>⌘G</kbd></button>
+      </section>
 
       <!-- Position / Size -->
       <section class="prop-section">
@@ -124,9 +157,9 @@
       <section class="prop-section">
         <div class="prop-row">
           <label>BG</label>
-          <input type="color" :value="project.background"
-            @input="patchProject({ background: $event.target.value })" />
-          <span class="color-hex">{{ project.background }}</span>
+          <input type="color" :value="effectiveBg"
+            @input="setBackground($event.target.value)" />
+          <span class="color-hex">{{ effectiveBg }}</span>
         </div>
       </section>
 
@@ -140,6 +173,34 @@
           <label>Frames</label>
           <input type="number" :value="project.totalFrames" min="1" max="36000"
             @change="patchProject({ totalFrames: +$event.target.value })" />
+        </div>
+      </section>
+
+      <section class="prop-section">
+        <div class="prop-row">
+          <label>Grid</label>
+          <input type="checkbox" :checked="grid.visible" @change="grid.visible = $event.target.checked" />
+          <span class="toggle-label">Show</span>
+          <input type="checkbox" :checked="grid.snap" @change="grid.snap = $event.target.checked" style="margin-left:8px" />
+          <span class="toggle-label">Snap</span>
+        </div>
+        <div class="prop-row">
+          <label>Spacing</label>
+          <input type="range" min="5" max="100" step="5"
+            :value="grid.spacing"
+            @input="grid.spacing = +$event.target.value" />
+          <span class="color-hex">{{ grid.spacing }}px</span>
+        </div>
+        <div class="prop-row">
+          <label>Point Snap</label>
+          <input type="checkbox" :checked="uxState.pointSnap" @change="uxState.pointSnap = $event.target.checked" />
+          <span class="toggle-label" style="flex:1">Snap lines &amp; pen to element points</span>
+        </div>
+        <div class="prop-row" :style="{ opacity: uxState.pointSnap ? 1 : 0.4 }">
+          <label>Auto-group</label>
+          <input type="checkbox" :checked="uxState.autoGroupOnSnap" :disabled="!uxState.pointSnap"
+            @change="uxState.autoGroupOnSnap = $event.target.checked" />
+          <span class="toggle-label" style="flex:1">Group on snap</span>
         </div>
       </section>
 
@@ -166,20 +227,52 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import uxState from '../../stores/uxState.js'
 import dataState, {
   updateElement, updateProject, addKeyframe,
   bringForward as bringFwd, sendBackward as sendBwd,
+  groupElements, ungroupElements,
+  renameElement, setGroupName,
 } from '../../stores/dataState.js'
 import { syncProxyToElement } from '../../stores/animationStore.js'
 import { extractTweenableProps } from '../../composables/useDrawing.js'
 
+const grid = uxState.grid
 const primaryId = computed(() => uxState.selectedIds[0] ?? null)
 const el = computed(() => primaryId.value ? dataState.elements[primaryId.value] : null)
+const isMultiSelect = computed(() => uxState.selectedIds.length > 1)
+const isGrouped = computed(() => !!el.value?.groupId)
+const groupInfo = computed(() => el.value?.groupId ? dataState.groups[el.value.groupId] : null)
+
+const renameWarning = ref('')
+const groupRenameWarning = ref('')
+let _warningTimer = null
+let _groupWarningTimer = null
+
+function showWarning(ref_, msg) {
+  ref_.value = msg
+  clearTimeout(_warningTimer)
+  _warningTimer = setTimeout(() => { ref_.value = '' }, 3000)
+}
+
+function handleRename(desired) {
+  if (!primaryId.value) return
+  const actual = renameElement(primaryId.value, desired)
+  if (actual !== desired.trim()) showWarning(renameWarning, `Renamed to "${actual}"`)
+  else renameWarning.value = ''
+}
+
+function handleGroupRename(desired) {
+  if (!el.value?.groupId) return
+  const actual = setGroupName(el.value.groupId, desired)
+  if (actual !== desired.trim()) showWarning(groupRenameWarning, `Renamed to "${actual}"`)
+  else groupRenameWarning.value = ''
+}
 const project = computed(() => dataState.project)
 const canvasZoom = computed(() => uxState.canvasZoom)
 const currentFrame = computed(() => Math.round(uxState.currentFrame))
+const effectiveBg = computed(() => uxState.sessionBg || project.value.background)
 
 function round(v) { return typeof v === 'number' ? Math.round(v * 10) / 10 : v }
 
@@ -191,6 +284,11 @@ function patch(p) {
 
 function patchProject(p) {
   updateProject(p)
+}
+
+function setBackground(color) {
+  uxState.sessionBg = color
+  updateProject({ background: color })
 }
 
 function setZoom(v) {
@@ -214,6 +312,8 @@ function addKf() {
 
 function bringForward(id) { bringFwd(id) }
 function sendBackward(id) { sendBwd(id) }
+function group() { groupElements(uxState.selectedIds) }
+function ungroup() { ungroupElements(uxState.selectedIds) }
 
 const sizePresets = [
   { label: '16:9 HD', w: 1280, h: 720 },
@@ -253,6 +353,39 @@ const toolHints = [
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border-bottom: 1px solid var(--border);
+}
+
+.name-section {
+  gap: 4px;
+}
+
+.name-input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 6px;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.name-input:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.name-input:focus {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+.rename-warning {
+  font-size: 10px;
+  color: #f0a443;
+  padding: 0 2px;
 }
 
 .prop-section {
@@ -407,6 +540,11 @@ const toolHints = [
 
 .preset-btn:hover { color: var(--text); border-color: var(--text-muted); }
 .preset-btn.active { color: var(--accent); border-color: var(--accent); }
+
+.toggle-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
 
 .hint-grid {
   display: flex;
