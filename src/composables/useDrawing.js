@@ -20,8 +20,8 @@ function humanLabel(type) {
   return `${labels[type] ?? type} ${Object.values(dataState.elements).filter(e => e.type === type).length + 1}`
 }
 
-const DEFAULT_FILL = { rect: '#4a90e2', ellipse: '#7ed321', line: 'none', arrow: 'none', text: '#eaeaea', path: 'none' }
-const DEFAULT_STROKE = { rect: '#2c5f9e', ellipse: '#5a9a18', line: '#eaeaea', arrow: '#eaeaea', text: 'none', path: '#eaeaea' }
+const DEFAULT_FILL = { rect: '#a8d5a2', ellipse: '#a8d5a2', line: 'none', arrow: 'none', text: '#333333', path: 'none' }
+const DEFAULT_STROKE = { rect: '#333333', ellipse: '#333333', line: '#333333', arrow: '#333333', text: 'none', path: '#333333' }
 
 function commitShape() {
   const { startX, startY, currentX, currentY, points } = uxState.drawState
@@ -37,17 +37,17 @@ function commitShape() {
     const y = Math.min(startY, currentY)
     const width = Math.max(minSize, Math.abs(currentX - startX))
     const height = Math.max(minSize, Math.abs(currentY - startY))
-    Object.assign(el, { x, y, width, height, rx: 0, fill: DEFAULT_FILL.rect, stroke: DEFAULT_STROKE.rect, strokeWidth: 2, opacity: 1 })
+    Object.assign(el, { x, y, width, height, rx: 0, fill: DEFAULT_FILL.rect, stroke: DEFAULT_STROKE.rect, strokeWidth: 1, opacity: 1 })
   } else if (type === 'ellipse') {
     const cx = (startX + currentX) / 2
     const cy = (startY + currentY) / 2
     const rx = Math.max(minSize, Math.abs(currentX - startX) / 2)
     const ry = Math.max(minSize, Math.abs(currentY - startY) / 2)
-    Object.assign(el, { cx, cy, rx, ry, fill: DEFAULT_FILL.ellipse, stroke: DEFAULT_STROKE.ellipse, strokeWidth: 2, opacity: 1 })
+    Object.assign(el, { cx, cy, rx, ry, fill: DEFAULT_FILL.ellipse, stroke: DEFAULT_STROKE.ellipse, strokeWidth: 1, opacity: 1 })
   } else if (type === 'line' || type === 'arrow') {
     Object.assign(el, {
       x1: startX, y1: startY, x2: currentX, y2: currentY,
-      stroke: DEFAULT_STROKE.line, strokeWidth: 2, fill: 'none', opacity: 1,
+      stroke: DEFAULT_STROKE.line, strokeWidth: 1, fill: 'none', opacity: 1,
       ...(type === 'arrow' ? { markerEnd: true, markerStart: false } : {}),
     })
   } else if (type === 'text') {
@@ -100,12 +100,25 @@ export function useDrawing() {
     })
   }
 
-  function onMouseMove(svgPoint) {
+  function onMouseMove(svgPoint, shiftKey = false) {
     if (!uxState.drawState.active) return
-    uxState.drawState.currentX = svgPoint.x
-    uxState.drawState.currentY = svgPoint.y
+    let x = svgPoint.x
+    let y = svgPoint.y
+    if (shiftKey && (uxState.activeTool === 'line' || uxState.activeTool === 'arrow')) {
+      const { startX, startY } = uxState.drawState
+      const dx = x - startX
+      const dy = y - startY
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI
+      const snapped = Math.round(angle / 45) * 45
+      const rad = snapped * Math.PI / 180
+      x = startX + dist * Math.cos(rad)
+      y = startY + dist * Math.sin(rad)
+    }
+    uxState.drawState.currentX = x
+    uxState.drawState.currentY = y
     if (uxState.activeTool === 'path') {
-      uxState.drawState.points.push([svgPoint.x, svgPoint.y])
+      uxState.drawState.points.push([x, y])
     }
   }
 
@@ -127,20 +140,20 @@ export function useDrawing() {
     if (type === 'rect') {
       return { type, x: Math.min(startX, currentX), y: Math.min(startY, currentY),
         width: Math.abs(currentX - startX), height: Math.abs(currentY - startY),
-        fill: 'rgba(74,144,226,0.2)', stroke: '#4a90e2', strokeWidth: 1.5, opacity: 1 }
+        fill: 'rgba(168,213,162,0.3)', stroke: '#333333', strokeWidth: 1.5, opacity: 1 }
     } else if (type === 'ellipse') {
       return { type, cx: (startX + currentX) / 2, cy: (startY + currentY) / 2,
         rx: Math.abs(currentX - startX) / 2, ry: Math.abs(currentY - startY) / 2,
-        fill: 'rgba(126,211,33,0.2)', stroke: '#7ed321', strokeWidth: 1.5, opacity: 1 }
+        fill: 'rgba(168,213,162,0.3)', stroke: '#333333', strokeWidth: 1.5, opacity: 1 }
     } else if (type === 'line' || type === 'arrow') {
       return { type, x1: startX, y1: startY, x2: currentX, y2: currentY,
-        stroke: '#eaeaea', strokeWidth: 1.5, fill: 'none', opacity: 1,
+        stroke: '#333333', strokeWidth: 1, fill: 'none', opacity: 1,
         ...(type === 'arrow' ? { markerEnd: true } : {}) }
     } else if (type === 'path' && points.length > 1) {
-      return { type, d: pointsToPath(points), stroke: '#eaeaea', strokeWidth: 1.5, fill: 'none', opacity: 1 }
+      return { type, d: pointsToPath(points), stroke: '#333333', strokeWidth: 1.5, fill: 'none', opacity: 1 }
     } else if (type === 'text') {
       return { type, x: startX, y: startY, content: 'Text', fontSize: 18,
-        fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 'normal', fill: '#eaeaea', opacity: 0.5 }
+        fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 'normal', fill: '#333333', opacity: 0.5 }
     }
     return null
   })

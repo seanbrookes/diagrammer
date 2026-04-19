@@ -41,7 +41,7 @@
     style="cursor: move"
   />
 
-  <!-- arrow -->
+  <!-- arrow — color: el.stroke makes currentColor in the marker inherit the line color -->
   <line
     v-else-if="el.type === 'arrow'"
     :data-element-id="el.id"
@@ -53,7 +53,7 @@
     :marker-end="el.markerEnd ? 'url(#arrowhead)' : null"
     :marker-start="el.markerStart ? 'url(#arrowhead-start)' : null"
     stroke-linecap="round"
-    style="cursor: move"
+    :style="{ cursor: 'move', color: el.stroke }"
   />
 
   <!-- text -->
@@ -69,9 +69,9 @@
     style="cursor: move; user-select: none"
   >{{ el.content }}</text>
 
-  <!-- path -->
+  <!-- path / pen -->
   <path
-    v-else-if="el.type === 'path'"
+    v-else-if="el.type === 'path' || el.type === 'pen'"
     :data-element-id="el.id"
     :d="el.d"
     :stroke="el.stroke"

@@ -1,4 +1,4 @@
-import dataState, { loadProjectData } from '../stores/dataState.js'
+import dataState, { loadProjectData, clearSessionData } from '../stores/dataState.js'
 import { rebuildGsapTimeline, elementProxies, ensureProxy } from '../stores/animationStore.js'
 import uxState from '../stores/uxState.js'
 
@@ -19,6 +19,7 @@ export function saveProject() {
     elements: { ...dataState.elements },
     elementOrder: [...dataState.elementOrder],
     keyframes: { ...dataState.keyframes },
+    groups: { ...dataState.groups },
   }
   downloadFile(JSON.stringify(payload, null, 2), `${dataState.project.name}.diagram.json`)
 }
@@ -32,6 +33,7 @@ export function loadProject(file) {
         alert('Invalid diagram file.')
         return
       }
+      clearSessionData()
       loadProjectData({
         project: data.project,
         elements: data.elements,
@@ -41,6 +43,7 @@ export function loadProject(file) {
       uxState.selectedIds = []
       uxState.currentFrame = 0
       uxState.isPlaying = false
+      uxState.sessionBg = ''
 
       // Ensure proxies exist for all loaded elements
       for (const id of data.elementOrder) ensureProxy(id)
