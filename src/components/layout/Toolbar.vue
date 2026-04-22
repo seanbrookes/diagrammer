@@ -13,7 +13,58 @@
     </div>
 
     <div class="toolbar-center">
-      <span class="project-name">{{ projectName }}</span>
+      <input
+        class="project-name-input"
+        :value="projectName"
+        @change="updateProject({ name: $event.target.value.trim() || 'Untitled' })"
+        @keydown.enter="$event.target.blur()"
+        spellcheck="false"
+      />
+    </div>
+
+    <div class="toolbar-group">
+      <!-- Storyboard toggle -->
+      <button class="tool-btn" :class="{ active: uxState.storyboardMode }"
+              title="Storyboard (M)" @click="toggleStoryboard">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="5" height="16" rx="1"/>
+          <rect x="9.5" y="4" width="5" height="16" rx="1"/>
+          <rect x="17" y="4" width="5" height="16" rx="1"/>
+        </svg>
+      </button>
+      <!-- Capture scene -->
+      <button class="tool-btn" title="Capture Scene" @click="onCaptureScene">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <path d="M8 21h8M12 17v4"/>
+          <circle cx="12" cy="10" r="3"/>
+        </svg>
+      </button>
+
+      <!-- Scene selector: shown when scenes exist -->
+      <div v-if="scenes.length" class="scene-selector" v-click-outside="() => sceneSelectorOpen = false">
+        <button class="scene-sel-btn" :class="{ active: activeSceneId }" @click="sceneSelectorOpen = !sceneSelectorOpen">
+          <span v-if="activeScene" class="scene-sel-seq">#{{ activeScene.sequence }}</span>
+          <span class="scene-sel-name">{{ activeScene ? sceneLabel(activeScene) : 'Scenes' }}</span>
+          <span class="scene-sel-count" v-if="!activeScene">{{ scenes.length }}</span>
+          <span class="scene-sel-chevron">▾</span>
+        </button>
+        <div v-if="sceneSelectorOpen" class="scene-sel-dropdown">
+          <div
+            v-for="s in sortedScenes" :key="s.id"
+            class="scene-sel-item" :class="{ active: s.id === activeSceneId }"
+            @click="selectScene(s.id)"
+          >
+            <span class="scene-sel-item-seq">#{{ s.sequence }}</span>
+            <span class="scene-sel-item-name">{{ sceneLabel(s) }}</span>
+            <span class="scene-sel-item-frame">f{{ s.frame }}</span>
+          </div>
+          <div v-if="activeSceneId" class="scene-sel-divider" />
+          <div v-if="activeSceneId" class="scene-sel-action" @click="onCloneScene">
+            Clone current scene
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="toolbar-group">
@@ -41,13 +92,42 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import uxState, { setTool } from '../../stores/uxState.js'
-import dataState from '../../stores/dataState.js'
+import dataState, { updateProject } from '../../stores/dataState.js'
 import { saveProject, openFilePicker, exportSvg as doExportSvg } from '../../composables/usePersistence.js'
+import { captureScene, enterSceneEdit, exitSceneEdit, cloneScene, sceneLabel } from '../../stores/sceneStore.js'
 
 const activeTool = computed(() => uxState.activeTool)
 const projectName = computed(() => dataState.project.name)
+const activeSceneId = computed(() => uxState.activeSceneId)
+const scenes = computed(() => dataState.scenes)
+const sortedScenes = computed(() => [...scenes.value].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)))
+const activeScene = computed(() => scenes.value.find(s => s.id === activeSceneId.value) ?? null)
+const sceneSelectorOpen = ref(false)
+
+const vClickOutside = {
+  mounted(el, binding) {
+    el._clickOutside = (e) => { if (!el.contains(e.target)) binding.value(e) }
+    document.addEventListener('mousedown', el._clickOutside)
+  },
+  unmounted(el) { document.removeEventListener('mousedown', el._clickOutside) },
+}
+
+function selectScene(id) {
+  sceneSelectorOpen.value = false
+  if (id === activeSceneId.value) return
+  if (activeSceneId.value) exitSceneEdit()
+  enterSceneEdit(id)
+}
+
+function onCloneScene() {
+  sceneSelectorOpen.value = false
+  const sourceId = activeSceneId.value
+  if (!sourceId) return
+  exitSceneEdit()
+  cloneScene(sourceId)
+}
 
 const tools = [
   { id: 'select',  label: 'Select',    key: 'V', icon: '↖' },
@@ -70,6 +150,8 @@ const tools = [
 function save() { saveProject() }
 function open() { openFilePicker() }
 function exportSvg() { doExportSvg() }
+function toggleStoryboard() { uxState.storyboardMode = !uxState.storyboardMode }
+function onCaptureScene() { captureScene() }
 </script>
 
 <style scoped>
@@ -101,11 +183,22 @@ function exportSvg() { doExportSvg() }
   text-align: center;
 }
 
-.project-name {
+.project-name-input {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--text);
   font-weight: 500;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 8px;
+  text-align: center;
+  min-width: 80px;
+  max-width: 240px;
+  width: auto;
+  transition: border-color 0.15s;
 }
+.project-name-input:hover { border-color: var(--border) }
+.project-name-input:focus { outline: none; border-color: #4a90e2; color: var(--text) }
 
 .tool-btn {
   display: flex;
@@ -137,4 +230,77 @@ function exportSvg() { doExportSvg() }
   font-style: normal;
   line-height: 1;
 }
+
+/* Scene selector */
+.scene-selector {
+  position: relative;
+  align-self: center;
+}
+
+.scene-sel-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  height: 32px;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+.scene-sel-btn:hover { background: var(--surface-2) }
+.scene-sel-btn.active { border-color: #4a90e2; color: #aad0f5 }
+
+.scene-sel-seq { color: #6db3f2; font-weight: 600; font-size: 11px }
+.scene-sel-name { font-weight: 500 }
+.scene-sel-count {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+}
+.scene-sel-chevron { font-size: 10px; opacity: 0.5; margin-left: 2px }
+
+.scene-sel-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.scene-sel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  transition: background 0.1s;
+}
+.scene-sel-item:hover { background: var(--surface-2) }
+.scene-sel-item.active { background: rgba(74,144,226,0.12); color: #aad0f5 }
+.scene-sel-item-seq { color: #6db3f2; font-weight: 600; font-size: 11px; flex-shrink: 0 }
+.scene-sel-item-name { flex: 1 }
+.scene-sel-item-frame { font-size: 11px; color: var(--text-muted, #666) }
+.scene-sel-divider { height: 1px; background: var(--border); margin: 4px 0 }
+.scene-sel-action {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+  transition: background 0.1s, color 0.1s;
+}
+.scene-sel-action:hover { background: var(--surface-2); color: var(--text) }
 </style>

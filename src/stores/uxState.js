@@ -15,6 +15,9 @@ const defaults = {
   grid: { visible: false, spacing: 20, snap: false },
   pointSnap: false,
   autoGroupOnSnap: false,
+  storyboardMode: false,
+  activeSceneId: null,
+  storyboardZoom: 1,
   sessionBg: '',  // overrides project.background for this tab session
   // transient — not persisted
   isPlaying: false,
@@ -65,7 +68,7 @@ const uxState = reactive({
   ...loadSession(),
 })
 
-const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap']
+const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap', 'storyboardZoom']
 const SESSION_KEYS = ['sessionBg']
 
 watch(

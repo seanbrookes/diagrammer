@@ -12,6 +12,7 @@ import { generateId } from '../utils/idgen.js'
 import { undo, redo } from './useHistory.js'
 import { saveProject } from './usePersistence.js'
 import { cancelPen, penState } from './usePen.js'
+import { exitSceneEdit } from '../stores/sceneStore.js'
 
 export function useKeyboardShortcuts() {
   function deleteSelected() {
@@ -65,7 +66,8 @@ export function useKeyboardShortcuts() {
       if ('x2' in el) { patch.x2 = el.x2 + dx; proxy.x2 = patch.x2 }
       if ('y2' in el) { patch.y2 = el.y2 + dy; proxy.y2 = patch.y2 }
       updateElement(id, patch)
-      addKeyframe(id, frame, extractTweenableProps(dataState.elements[id]))
+      if (!uxState.activeSceneId)
+        addKeyframe(id, frame, extractTweenableProps(dataState.elements[id]))
     }
     return true
   }
@@ -110,8 +112,13 @@ export function useKeyboardShortcuts() {
       case 'p': case 'P': setTool('path'); break
       case 'b': case 'B': setTool('pen'); break
       case 'c': case 'C': if (!e.ctrlKey && !e.metaKey) setTool('snapshot'); break
+      case 'm': case 'M':
+        if (!e.ctrlKey && !e.metaKey && !uxState.activeSceneId)
+          uxState.storyboardMode = !uxState.storyboardMode
+        break
       case 'Delete': case 'Backspace': deleteSelected(); break
       case 'Escape':
+        if (uxState.activeSceneId) { exitSceneEdit(); break }
         if (penState.active) cancelPen()
         setTool('select'); clearSelection(); break
       case ' ':
