@@ -254,12 +254,15 @@ export function useSelection() {
 
   function onMouseUp() {
     if (uxState.dragState.active && Object.keys(_dragOrigPropsMap).length) {
-      const frame = Math.round(uxState.currentFrame)
-      for (const id of Object.keys(_dragOrigPropsMap)) {
-        const el = dataState.elements[id]
-        if (el) {
-          addKeyframe(id, frame, extractTweenableProps(el))
-          syncProxyToElement(id)
+      // In scene edit mode, skip keyframe creation — exitSceneEdit captures the state
+      if (!uxState.activeSceneId) {
+        const frame = Math.round(uxState.currentFrame)
+        for (const id of Object.keys(_dragOrigPropsMap)) {
+          const el = dataState.elements[id]
+          if (el) {
+            addKeyframe(id, frame, extractTweenableProps(el))
+            syncProxyToElement(id)
+          }
         }
       }
     }

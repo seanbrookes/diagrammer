@@ -29,6 +29,7 @@ const dataState = reactive({
   elementOrder: _session?.elementOrder ?? [],
   keyframes: _session?.keyframes ?? {},
   groups: _session?.groups ?? {},  // Record<groupId, { name }>
+  scenes: _session?.scenes ?? [],  // Array<{ id, name, frame, elementStates }>
 })
 
 let _sessionSaveTimer = null
@@ -44,6 +45,7 @@ watch(
           elementOrder: dataState.elementOrder,
           keyframes: dataState.keyframes,
           groups: dataState.groups,
+          scenes: dataState.scenes,
         }))
       } catch { /* sessionStorage quota exceeded — silently skip */ }
     }, 500)
@@ -268,6 +270,7 @@ export function resetProject() {
   dataState.elementOrder = []
   dataState.keyframes = {}
   dataState.groups = {}
+  dataState.scenes = []
 }
 
 export function loadProjectData(data) {
@@ -276,6 +279,7 @@ export function loadProjectData(data) {
   dataState.elementOrder = [...data.elementOrder]
   dataState.keyframes = { ...data.keyframes }
   dataState.groups = { ...(data.groups ?? {}) }
+  dataState.scenes = [...(data.scenes ?? [])]
 }
 
 export function clearSessionData() {

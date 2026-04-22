@@ -1,17 +1,23 @@
 <template>
   <div class="app-layout">
     <Toolbar />
-    <SvgCanvas />
+    <StoryboardCanvas v-if="storyboardMode" />
+    <SvgCanvas v-else />
     <PropertiesPanel />
     <TimelinePanel />
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import Toolbar from './Toolbar.vue'
 import PropertiesPanel from './PropertiesPanel.vue'
 import SvgCanvas from '../canvas/SvgCanvas.vue'
+import StoryboardCanvas from '../canvas/StoryboardCanvas.vue'
 import TimelinePanel from '../timeline/TimelinePanel.vue'
+import uxState from '../../stores/uxState.js'
+
+const storyboardMode = computed(() => uxState.storyboardMode)
 </script>
 
 <style scoped>

@@ -123,16 +123,51 @@
     </template>
 
     <template v-else>
-      <!-- Canvas / project settings when nothing selected -->
-      <div class="panel-title">Canvas</div>
 
-      <section class="prop-section">
-        <div class="prop-row">
-          <label>Name</label>
-          <input type="text" :value="project.name"
-            @change="patchProject({ name: $event.target.value })" />
-        </div>
-      </section>
+      <!-- ── Scene properties (when a scene is active) ─────────────────── -->
+      <template v-if="activeScene">
+        <div class="panel-title">Scene</div>
+
+        <section class="prop-section">
+          <div class="prop-row">
+            <label>#</label>
+            <span class="scene-seq-badge">{{ activeScene.sequence }}</span>
+          </div>
+          <div class="prop-row">
+            <label>Name</label>
+            <input type="text"
+              :value="activeScene.name ?? ''"
+              :placeholder="`Scene ${activeScene.sequence}`"
+              @change="patchScene({ name: $event.target.value.trim() || null })"
+              @keydown.enter="$event.target.blur()"
+              spellcheck="false" />
+          </div>
+          <div class="prop-row">
+            <label>Frame</label>
+            <input type="number" min="0" :value="activeScene.frame"
+              @change="patchScene({ frame: +$event.target.value })" />
+          </div>
+        </section>
+
+        <section class="prop-section">
+          <div class="prop-row">
+            <label>BG</label>
+            <input type="color" :value="activeScene.background || project.background"
+              @input="patchScene({ background: $event.target.value })" />
+            <span class="color-hex">{{ activeScene.background || project.background }}</span>
+          </div>
+          <div class="prop-row" v-if="activeScene.background">
+            <button class="add-kf-btn" @click="patchScene({ background: null })">
+              ↩ Use diagram default
+            </button>
+          </div>
+        </section>
+
+        <div class="panel-divider" />
+      </template>
+
+      <!-- ── Diagram settings (global) ─────────────────────────────────── -->
+      <div class="panel-title">Diagram</div>
 
       <section class="prop-section">
         <div class="prop-row">
@@ -154,12 +189,12 @@
         </div>
       </section>
 
-      <section class="prop-section">
+      <section class="prop-section" v-if="!activeScene">
         <div class="prop-row">
           <label>BG</label>
-          <input type="color" :value="effectiveBg"
-            @input="setBackground($event.target.value)" />
-          <span class="color-hex">{{ effectiveBg }}</span>
+          <input type="color" :value="project.background"
+            @input="patchProject({ background: $event.target.value })" />
+          <span class="color-hex">{{ project.background }}</span>
         </div>
       </section>
 
@@ -235,6 +270,7 @@ import dataState, {
   groupElements, ungroupElements,
   renameElement, setGroupName,
 } from '../../stores/dataState.js'
+import { updateSceneMeta } from '../../stores/sceneStore.js'
 import { syncProxyToElement } from '../../stores/animationStore.js'
 import { extractTweenableProps } from '../../composables/useDrawing.js'
 
@@ -270,9 +306,9 @@ function handleGroupRename(desired) {
   else groupRenameWarning.value = ''
 }
 const project = computed(() => dataState.project)
+const activeScene = computed(() => dataState.scenes.find(s => s.id === uxState.activeSceneId) ?? null)
 const canvasZoom = computed(() => uxState.canvasZoom)
 const currentFrame = computed(() => Math.round(uxState.currentFrame))
-const effectiveBg = computed(() => uxState.sessionBg || project.value.background)
 
 function round(v) { return typeof v === 'number' ? Math.round(v * 10) / 10 : v }
 
@@ -286,9 +322,8 @@ function patchProject(p) {
   updateProject(p)
 }
 
-function setBackground(color) {
-  uxState.sessionBg = color
-  updateProject({ background: color })
+function patchScene(patch) {
+  if (activeScene.value) updateSceneMeta(activeScene.value.id, patch)
 }
 
 function setZoom(v) {
@@ -353,6 +388,18 @@ const toolHints = [
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border-bottom: 1px solid var(--border);
+}
+
+.panel-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.scene-seq-badge {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6db3f2;
 }
 
 .name-section {

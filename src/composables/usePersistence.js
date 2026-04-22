@@ -20,6 +20,7 @@ export function saveProject() {
     elementOrder: [...dataState.elementOrder],
     keyframes: { ...dataState.keyframes },
     groups: { ...dataState.groups },
+    scenes: [...dataState.scenes],
   }
   downloadFile(JSON.stringify(payload, null, 2), `${dataState.project.name}.diagram.json`)
 }
@@ -39,6 +40,8 @@ export function loadProject(file) {
         elements: data.elements,
         elementOrder: data.elementOrder,
         keyframes: data.keyframes,
+        groups: data.groups,
+        scenes: data.scenes,
       })
       uxState.selectedIds = []
       uxState.currentFrame = 0

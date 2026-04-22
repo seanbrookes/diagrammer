@@ -1,5 +1,31 @@
 <template>
   <div class="canvas-container" @wheel.ctrl.prevent="onCtrlWheel">
+    <!-- Carousel: prev scene -->
+    <div v-if="prevScene" class="scene-nav scene-nav-left" @click="goToScene(prevScene.id)">
+      <div class="scene-nav-inner">
+        <span class="scene-nav-arrow">‹</span>
+        <span class="scene-nav-label"><span class="scene-nav-seq">#{{ prevScene.sequence }}</span> {{ sceneLabel(prevScene) }}</span>
+      </div>
+    </div>
+
+    <!-- Carousel: next scene -->
+    <div v-if="nextScene" class="scene-nav scene-nav-right" @click="goToScene(nextScene.id)">
+      <div class="scene-nav-inner">
+        <span class="scene-nav-label"><span class="scene-nav-seq">#{{ nextScene.sequence }}</span> {{ sceneLabel(nextScene) }}</span>
+        <span class="scene-nav-arrow">›</span>
+      </div>
+    </div>
+
+    <!-- Capture toast -->
+    <Transition name="toast">
+      <div v-if="captureToast.visible" class="scene-toast">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1" y="1" width="6" height="6" rx="0.5"/><rect x="9" y="1" width="6" height="6" rx="0.5"/>
+          <rect x="1" y="9" width="6" height="6" rx="0.5"/><rect x="9" y="9" width="6" height="6" rx="0.5"/>
+        </svg>
+        <span>Scene captured: <strong>{{ captureToast.label }}</strong></span>
+      </div>
+    </Transition>
     <svg
       id="main-canvas"
       ref="svgRef"
@@ -135,6 +161,7 @@ import { syncProxyToElement, removeProxy } from '../../stores/animationStore.js'
 import { clearSelection } from '../../stores/uxState.js'
 import { snapIndicator } from '../../utils/snapPoints.js'
 import { useSnapshot, snapshotRect } from '../../composables/useSnapshot.js'
+import { exitSceneEdit, enterSceneEdit, captureToast, sceneLabel } from '../../stores/sceneStore.js'
 
 const svgRef = ref(null)
 const ctxMenu = reactive({ visible: false, x: 0, y: 0 })
@@ -179,8 +206,28 @@ const canvasZoom = computed(() => uxState.canvasZoom)
 const selectedIds = computed(() => uxState.selectedIds)
 const activeTool = computed(() => uxState.activeTool)
 const grid = computed(() => uxState.grid)
+const activeSceneId = computed(() => uxState.activeSceneId)
+const currentSceneIndex = computed(() => dataState.scenes.findIndex(s => s.id === uxState.activeSceneId))
+const prevScene = computed(() => currentSceneIndex.value > 0 ? dataState.scenes[currentSceneIndex.value - 1] : null)
+const nextScene = computed(() => {
+  if (!dataState.scenes.length) return null
+  // No active scene → offer the first scene
+  if (currentSceneIndex.value < 0) return dataState.scenes[0]
+  if (currentSceneIndex.value < dataState.scenes.length - 1) return dataState.scenes[currentSceneIndex.value + 1]
+  return null
+})
 
-const effectiveBg = computed(() => uxState.sessionBg || project.value.background)
+function goToScene(id) {
+  if (id === uxState.activeSceneId) return
+  if (uxState.activeSceneId) exitSceneEdit()
+  enterSceneEdit(id)
+}
+
+const activeScene = computed(() => dataState.scenes.find(s => s.id === uxState.activeSceneId) ?? null)
+const effectiveBg = computed(() =>
+  activeScene.value?.background ||
+  project.value.background
+)
 
 function hexLuminance(hex) {
   const h = hex.replace('#', '')
@@ -271,7 +318,12 @@ function onMouseLeave() {
 
 function onCtrlWheel(event) {
   const delta = event.deltaY > 0 ? -0.1 : 0.1
-  uxState.canvasZoom = Math.max(0.1, Math.min(4, uxState.canvasZoom + delta))
+  const next = uxState.canvasZoom + delta
+  if (next < 0.1 && dataState.scenes.length > 0) {
+    uxState.storyboardMode = true
+    return
+  }
+  uxState.canvasZoom = Math.max(0.1, Math.min(4, next))
 }
 
 function onDblClick(event) {
@@ -297,7 +349,83 @@ function onDblClick(event) {
   padding: 40px;
   min-height: 0;
   min-width: 0;
+  position: relative;
 }
+
+.scene-nav-seq {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* Carousel nav arrows */
+.scene-nav {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+  cursor: pointer;
+  pointer-events: all;
+}
+.scene-nav:hover { opacity: 1 }
+.scene-nav-left {
+  left: 0;
+  background: linear-gradient(to right, rgba(0,0,0,0.45), transparent);
+}
+.scene-nav-right {
+  right: 0;
+  background: linear-gradient(to left, rgba(0,0,0,0.45), transparent);
+}
+.scene-nav-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.scene-nav-arrow {
+  font-size: 32px;
+  color: rgba(255,255,255,0.85);
+  line-height: 1;
+}
+.scene-nav-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.6);
+  text-align: center;
+  max-width: 50px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Capture toast */
+.scene-toast {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(20, 30, 50, 0.92);
+  border: 1px solid rgba(74, 144, 226, 0.4);
+  border-radius: 8px;
+  font-size: 13px;
+  color: #aad0f5;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.toast-enter-active { transition: opacity 0.25s, transform 0.25s }
+.toast-leave-active { transition: opacity 0.4s, transform 0.4s }
+.toast-enter-from  { opacity: 0; transform: translateX(-50%) translateY(8px) }
+.toast-leave-to    { opacity: 0; transform: translateX(-50%) translateY(4px) }
 
 /* When canvas is larger than container, start from top-left so it's still scrollable */
 .canvas-container > svg {
