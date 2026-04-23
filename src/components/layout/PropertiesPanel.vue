@@ -137,15 +137,10 @@
             <label>Name</label>
             <input type="text"
               :value="activeScene.name ?? ''"
-              :placeholder="`Scene ${activeScene.sequence}`"
-              @change="patchScene({ name: $event.target.value.trim() || null })"
+              :placeholder="sceneLabel(activeScene)"
+              @change="patchScene({ name: $event.target.value.trim() || `scene_${generateShortId()}` })"
               @keydown.enter="$event.target.blur()"
               spellcheck="false" />
-          </div>
-          <div class="prop-row">
-            <label>Frame</label>
-            <input type="number" min="0" :value="activeScene.frame"
-              @change="patchScene({ frame: +$event.target.value })" />
           </div>
         </section>
 
@@ -161,6 +156,10 @@
               ↩ Use diagram default
             </button>
           </div>
+        </section>
+
+        <section class="prop-section">
+          <button class="add-kf-btn danger-btn" @click="onDeleteScene">Delete Scene</button>
         </section>
 
         <div class="panel-divider" />
@@ -195,6 +194,20 @@
           <input type="color" :value="project.background"
             @input="patchProject({ background: $event.target.value })" />
           <span class="color-hex">{{ project.background }}</span>
+        </div>
+      </section>
+
+      <section class="prop-section">
+        <div class="prop-row">
+          <label>Scene Del</label>
+          <div class="seg-group">
+            <button class="seg-btn" :class="{ active: uxState.deleteBehavior === 'destructive' }"
+                    title="No confirm, no undo" @click="uxState.deleteBehavior = 'destructive'">Fast</button>
+            <button class="seg-btn" :class="{ active: uxState.deleteBehavior === 'non-destructive' }"
+                    title="No confirm, yes undo" @click="uxState.deleteBehavior = 'non-destructive'">Undo</button>
+            <button class="seg-btn" :class="{ active: uxState.deleteBehavior === 'safe' }"
+                    title="Confirm dialog + undo" @click="uxState.deleteBehavior = 'safe'">Safe</button>
+          </div>
         </div>
       </section>
 
@@ -270,7 +283,8 @@ import dataState, {
   groupElements, ungroupElements,
   renameElement, setGroupName,
 } from '../../stores/dataState.js'
-import { updateSceneMeta } from '../../stores/sceneStore.js'
+import { updateSceneMeta, deleteScene, sceneLabel } from '../../stores/sceneStore.js'
+import { generateShortId } from '../../utils/idgen.js'
 import { syncProxyToElement } from '../../stores/animationStore.js'
 import { extractTweenableProps } from '../../composables/useDrawing.js'
 
@@ -324,6 +338,15 @@ function patchProject(p) {
 
 function patchScene(patch) {
   if (activeScene.value) updateSceneMeta(activeScene.value.id, patch)
+}
+
+function onDeleteScene() {
+  const scene = activeScene.value
+  if (!scene) return
+  if (uxState.deleteBehavior === 'safe') {
+    if (!window.confirm(`Delete "${sceneLabel(scene)}"?`)) return
+  }
+  deleteScene(scene.id)
 }
 
 function setZoom(v) {
@@ -537,6 +560,8 @@ const toolHints = [
 }
 
 .add-kf-btn:hover { background: var(--accent); color: #fff; }
+.danger-btn { color: #e94560; }
+.danger-btn:hover { background: rgba(233,69,96,0.15); color: #e94560; }
 
 .panel-empty {
   padding: 16px 12px;
@@ -587,6 +612,28 @@ const toolHints = [
 
 .preset-btn:hover { color: var(--text); border-color: var(--text-muted); }
 .preset-btn.active { color: var(--accent); border-color: var(--accent); }
+
+.seg-group {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  flex: 1;
+}
+.seg-btn {
+  flex: 1;
+  padding: 3px 0;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.seg-btn:last-child { border-right: none; }
+.seg-btn:hover { background: var(--surface-2); color: var(--text); }
+.seg-btn.active { background: var(--accent); color: #fff; }
 
 .toggle-label {
   font-size: 11px;

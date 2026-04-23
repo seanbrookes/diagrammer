@@ -1,4 +1,4 @@
-import { reactive, computed, watch } from 'vue'
+import { reactive, computed, watch, toRaw } from 'vue'
 import { generateId } from '../utils/idgen.js'
 import { getBoundingBox } from '../utils/geometry.js'
 import { pointsToPath } from '../utils/svgPath.js'
@@ -39,6 +39,8 @@ watch(
     clearTimeout(_sessionSaveTimer)
     _sessionSaveTimer = setTimeout(() => {
       try {
+        // replacer unwraps Vue reactive proxies at every level
+        const deproxy = (_, v) => (v !== null && typeof v === 'object' ? toRaw(v) : v)
         sessionStorage.setItem(SESSION_DATA_KEY, JSON.stringify({
           project: dataState.project,
           elements: dataState.elements,
@@ -46,12 +48,27 @@ watch(
           keyframes: dataState.keyframes,
           groups: dataState.groups,
           scenes: dataState.scenes,
-        }))
+        }, deproxy))
       } catch { /* sessionStorage quota exceeded — silently skip */ }
     }, 500)
   },
   { deep: true }
 )
+
+export function flushSession() {
+  clearTimeout(_sessionSaveTimer)
+  try {
+    const deproxy = (_, v) => (v !== null && typeof v === 'object' ? toRaw(v) : v)
+    sessionStorage.setItem(SESSION_DATA_KEY, JSON.stringify({
+      project: dataState.project,
+      elements: dataState.elements,
+      elementOrder: dataState.elementOrder,
+      keyframes: dataState.keyframes,
+      groups: dataState.groups,
+      scenes: dataState.scenes,
+    }, deproxy))
+  } catch {}
+}
 
 export const sortedElements = computed(() =>
   dataState.elementOrder.map(id => dataState.elements[id]).filter(Boolean)

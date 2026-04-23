@@ -1,19 +1,29 @@
 <template>
   <div class="canvas-container" @wheel.ctrl.prevent="onCtrlWheel">
-    <!-- Carousel: prev scene -->
+    <!-- Scene nav: prev -->
     <div v-if="prevScene" class="scene-nav scene-nav-left" @click="goToScene(prevScene.id)">
-      <div class="scene-nav-inner">
-        <span class="scene-nav-arrow">‹</span>
-        <span class="scene-nav-label"><span class="scene-nav-seq">#{{ prevScene.sequence }}</span> {{ sceneLabel(prevScene) }}</span>
-      </div>
+      <span class="scene-nav-arrow">←</span>
+      <span class="scene-nav-seq">#{{ prevScene.sequence }}</span>
+      <span class="scene-nav-name">{{ sceneLabel(prevScene) }}</span>
     </div>
 
-    <!-- Carousel: next scene -->
+    <!-- Scene nav: next -->
     <div v-if="nextScene" class="scene-nav scene-nav-right" @click="goToScene(nextScene.id)">
-      <div class="scene-nav-inner">
-        <span class="scene-nav-label"><span class="scene-nav-seq">#{{ nextScene.sequence }}</span> {{ sceneLabel(nextScene) }}</span>
-        <span class="scene-nav-arrow">›</span>
-      </div>
+      <span class="scene-nav-name">{{ sceneLabel(nextScene) }}</span>
+      <span class="scene-nav-seq">#{{ nextScene.sequence }}</span>
+      <span class="scene-nav-arrow">→</span>
+    </div>
+
+    <!-- Scene progress indicator -->
+    <div v-if="sortedScenes.length" class="scene-progress">
+      <div
+        v-for="scene in sortedScenes"
+        :key="scene.id"
+        class="scene-pip"
+        :class="{ active: scene.id === activeSceneId }"
+        :title="sceneLabel(scene)"
+        @click="goToScene(scene.id)"
+      />
     </div>
 
     <!-- Capture toast -->
@@ -116,6 +126,21 @@
         pointer-events="none"
       />
 
+      <!-- Alignment guides -->
+      <g v-if="uxState.alignGuides.length" pointer-events="none">
+        <line
+          v-for="(g, i) in uxState.alignGuides" :key="i"
+          :x1="g.axis === 'x' ? g.pos : -9999"
+          :y1="g.axis === 'y' ? g.pos : -9999"
+          :x2="g.axis === 'x' ? g.pos : project.canvasWidth + 9999"
+          :y2="g.axis === 'y' ? g.pos : project.canvasHeight + 9999"
+          stroke="#f05252"
+          :stroke-width="1 / canvasZoom"
+          stroke-dasharray="none"
+          opacity="0.85"
+        />
+      </g>
+
       <!-- Point snap indicator -->
       <g v-if="snapIndicator.active" pointer-events="none">
         <circle :cx="snapIndicator.x" :cy="snapIndicator.y" r="7"
@@ -207,13 +232,14 @@ const selectedIds = computed(() => uxState.selectedIds)
 const activeTool = computed(() => uxState.activeTool)
 const grid = computed(() => uxState.grid)
 const activeSceneId = computed(() => uxState.activeSceneId)
-const currentSceneIndex = computed(() => dataState.scenes.findIndex(s => s.id === uxState.activeSceneId))
-const prevScene = computed(() => currentSceneIndex.value > 0 ? dataState.scenes[currentSceneIndex.value - 1] : null)
+const sortedScenes = computed(() => [...dataState.scenes].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)))
+const currentSceneIndex = computed(() => sortedScenes.value.findIndex(s => s.id === uxState.activeSceneId))
+const prevScene = computed(() => currentSceneIndex.value > 0 ? sortedScenes.value[currentSceneIndex.value - 1] : null)
 const nextScene = computed(() => {
-  if (!dataState.scenes.length) return null
+  if (!sortedScenes.value.length) return null
   // No active scene → offer the first scene
-  if (currentSceneIndex.value < 0) return dataState.scenes[0]
-  if (currentSceneIndex.value < dataState.scenes.length - 1) return dataState.scenes[currentSceneIndex.value + 1]
+  if (currentSceneIndex.value < 0) return sortedScenes.value[0]
+  if (currentSceneIndex.value < sortedScenes.value.length - 1) return sortedScenes.value[currentSceneIndex.value + 1]
   return null
 })
 
@@ -352,54 +378,86 @@ function onDblClick(event) {
   position: relative;
 }
 
-.scene-nav-seq {
-  font-size: 10px;
-  opacity: 0.7;
-}
-
-/* Carousel nav arrows */
+/* Scene nav buttons — top corners, always visible */
 .scene-nav {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 56px;
+  top: 16px;
   z-index: 8;
   display: flex;
   align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   cursor: pointer;
-  pointer-events: all;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  user-select: none;
+  max-width: 220px;
 }
-.scene-nav:hover { opacity: 1 }
-.scene-nav-left {
-  left: 0;
-  background: linear-gradient(to right, rgba(0,0,0,0.45), transparent);
+.scene-nav:hover {
+  background: var(--surface-2);
+  border-color: #4a90e2;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
 }
-.scene-nav-right {
-  right: 0;
-  background: linear-gradient(to left, rgba(0,0,0,0.45), transparent);
-}
-.scene-nav-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
+.scene-nav-left  { left: 16px; }
+.scene-nav-right { right: 16px; }
+
 .scene-nav-arrow {
-  font-size: 32px;
-  color: rgba(255,255,255,0.85);
+  font-size: 18px;
+  color: #4a90e2;
   line-height: 1;
+  flex-shrink: 0;
 }
-.scene-nav-label {
-  font-size: 10px;
-  color: rgba(255,255,255,0.6);
-  text-align: center;
-  max-width: 50px;
+.scene-nav-seq {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6db3f2;
+  flex-shrink: 0;
+}
+.scene-nav-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Scene progress indicator */
+.scene-progress {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-width: calc(100% - 320px);
+  overflow: hidden;
+  pointer-events: all;
+}
+.scene-pip {
+  width: 22px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1.5px solid rgba(180,180,180,0.35);
+  background: transparent;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.scene-pip.active {
+  background: #fff;
+  border-color: #fff;
+}
+.scene-pip:not(.active):hover {
+  border-color: rgba(255,255,255,0.65);
 }
 
 /* Capture toast */

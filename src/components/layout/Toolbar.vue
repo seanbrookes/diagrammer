@@ -23,26 +23,38 @@
     </div>
 
     <div class="toolbar-group">
-      <!-- Storyboard toggle -->
-      <button class="tool-btn" :class="{ active: uxState.storyboardMode }"
-              title="Storyboard (M)" @click="toggleStoryboard">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="4" width="5" height="16" rx="1"/>
-          <rect x="9.5" y="4" width="5" height="16" rx="1"/>
-          <rect x="17" y="4" width="5" height="16" rx="1"/>
-        </svg>
-      </button>
-      <!-- Capture scene -->
-      <button class="tool-btn" title="Capture Scene" @click="onCaptureScene">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="3" width="20" height="14" rx="2"/>
-          <path d="M8 21h8M12 17v4"/>
-          <circle cx="12" cy="10" r="3"/>
-        </svg>
-      </button>
+      <!-- Storyboard mode: back button + undo delete -->
+      <template v-if="uxState.storyboardMode">
+        <button class="sb-back-btn" title="Back to canvas (M)" @click="toggleStoryboard">
+          ← Canvas
+        </button>
+        <button class="sb-back-btn" @click="onNewScene">+ New Scene</button>
+        <button v-if="deletedSceneStack.length" class="sb-back-btn" @click="undoDeleteScene">
+          ↩ Undo Delete
+        </button>
+      </template>
 
-      <!-- Scene selector: shown when scenes exist -->
-      <div v-if="scenes.length" class="scene-selector" v-click-outside="() => sceneSelectorOpen = false">
+      <!-- Normal mode: storyboard icon + capture scene + scene selector -->
+      <template v-else>
+        <button class="tool-btn" title="Storyboard (M)" @click="toggleStoryboard">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="5" height="16" rx="1"/>
+            <rect x="9.5" y="4" width="5" height="16" rx="1"/>
+            <rect x="17" y="4" width="5" height="16" rx="1"/>
+          </svg>
+        </button>
+        <!-- Capture scene -->
+        <button class="tool-btn" title="Capture Scene" @click="onCaptureScene">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <path d="M8 21h8M12 17v4"/>
+            <circle cx="12" cy="10" r="3"/>
+          </svg>
+        </button>
+      </template>
+
+      <!-- Scene selector: shown when scenes exist and not in storyboard mode -->
+      <div v-if="scenes.length && !uxState.storyboardMode" class="scene-selector" v-click-outside="() => sceneSelectorOpen = false">
         <button class="scene-sel-btn" :class="{ active: activeSceneId }" @click="sceneSelectorOpen = !sceneSelectorOpen">
           <span v-if="activeScene" class="scene-sel-seq">#{{ activeScene.sequence }}</span>
           <span class="scene-sel-name">{{ activeScene ? sceneLabel(activeScene) : 'Scenes' }}</span>
@@ -96,7 +108,7 @@ import { ref, computed } from 'vue'
 import uxState, { setTool } from '../../stores/uxState.js'
 import dataState, { updateProject } from '../../stores/dataState.js'
 import { saveProject, openFilePicker, exportSvg as doExportSvg } from '../../composables/usePersistence.js'
-import { captureScene, enterSceneEdit, exitSceneEdit, cloneScene, sceneLabel } from '../../stores/sceneStore.js'
+import { captureScene, newScene, enterSceneEdit, exitSceneEdit, cloneScene, sceneLabel, deletedSceneStack, undoDeleteScene } from '../../stores/sceneStore.js'
 
 const activeTool = computed(() => uxState.activeTool)
 const projectName = computed(() => dataState.project.name)
@@ -126,7 +138,9 @@ function onCloneScene() {
   const sourceId = activeSceneId.value
   if (!sourceId) return
   exitSceneEdit()
-  cloneScene(sourceId)
+  const clone = cloneScene(sourceId)
+  if (clone) enterSceneEdit(clone.id)
+  else enterSceneEdit(sourceId)
 }
 
 const tools = [
@@ -151,6 +165,7 @@ function save() { saveProject() }
 function open() { openFilePicker() }
 function exportSvg() { doExportSvg() }
 function toggleStoryboard() { uxState.storyboardMode = !uxState.storyboardMode }
+function onNewScene() { newScene() }
 function onCaptureScene() { captureScene() }
 </script>
 
@@ -214,6 +229,22 @@ function onCaptureScene() { captureScene() }
   font-size: 22px;
   transition: background 0.1s, border-color 0.1s;
 }
+
+.sb-back-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  height: 32px;
+  align-self: center;
+  transition: background 0.1s, border-color 0.1s;
+}
+.sb-back-btn:hover { background: var(--surface-2); border-color: var(--text-muted, #666); }
 
 .tool-btn:hover {
   background: var(--surface-2);

@@ -1,13 +1,17 @@
-import { reactive } from 'vue'
+import { reactive, toRaw } from 'vue'
 import dataState, { addKeyframe } from './dataState.js'
 import uxState from './uxState.js'
 import { elementProxies, ensureProxy, removeProxy } from './animationStore.js'
 import { extractTweenableProps } from '../composables/useDrawing.js'
-import { generateId } from '../utils/idgen.js'
+import { generateId, generateShortId } from '../utils/idgen.js'
 import { pause } from './animationStore.js'
 
 function deepClone(obj) {
-  return JSON.parse(JSON.stringify(obj))
+  // replacer unwraps Vue reactive proxies at every level before serialization
+  return JSON.parse(JSON.stringify(obj, (_, v) => {
+    if (v !== null && typeof v === 'object') return toRaw(v)
+    return v
+  }))
 }
 
 // Pre-scene-edit snapshots — restored in full on exit
@@ -18,6 +22,19 @@ let _savedKeyframes   = {}
 // Toast shown briefly after a scene is captured
 export const captureToast = reactive({ visible: false, label: '' })
 let _toastTimer = null
+
+// Undo stack for scene deletions — each entry: { scene, sortedIdx }
+export const deletedSceneStack = reactive([])
+
+export function undoDeleteScene() {
+  const entry = deletedSceneStack.pop()
+  if (!entry) return
+  const sorted = [...dataState.scenes].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+  const insertAt = Math.min(entry.sortedIdx, sorted.length)
+  sorted.splice(insertAt, 0, entry.scene)
+  sorted.forEach((s, i) => { s.sequence = i + 1 })
+  dataState.scenes.splice(0, dataState.scenes.length, ...sorted)
+}
 
 // Sync elementProxies to current dataState.elements:
 // removes proxies for deleted elements, creates/updates proxies for existing ones.
@@ -33,9 +50,9 @@ function syncProxies() {
   }
 }
 
-// Return the display label for a scene: user-set name or "Scene N" fallback
+// Return the display label for a scene: stored name or short-id fallback for legacy null names
 export function sceneLabel(scene) {
-  return scene.name || `Scene ${scene.sequence}`
+  return scene.name || `scene_${scene.id.slice(-4)}`
 }
 
 // Sort by sequence and reassign 1..N. Uses splice to guarantee Vue reactivity.
@@ -53,16 +70,52 @@ export function backfillSequences() {
   }
   for (const s of dataState.scenes) {
     if (s.sequence == null) s.sequence = ++max
+    if (!('background' in s)) s.background = null
   }
 }
 
-// Capture current canvas state as a new scene appended at the end.
-export function captureScene(name) {
+// Create a blank scene appended at the end and enter it immediately.
+export function newScene() {
   backfillSequences()
   const sequence = dataState.scenes.length > 0
     ? Math.max(...dataState.scenes.map(s => s.sequence)) + 1
     : 1
-  const n = dataState.scenes.length + 1
+  const scene = {
+    id:           generateId('scene'),
+    sequence,
+    name:         `scene_${generateShortId()}`,
+    background:   null,
+    frame:        dataState.scenes.length * 60,
+    elements:     {},
+    elementOrder: [],
+    elementStates: {},
+  }
+  dataState.scenes.push(scene)
+  enterSceneEdit(scene.id)
+  return scene
+}
+
+// Capture current canvas state as a new scene.
+// When inside a scene, inserts immediately after it and inherits its background.
+// When on the base canvas, appends to the end.
+export function captureScene(name) {
+  backfillSequences()
+
+  const activeScene = uxState.activeSceneId
+    ? dataState.scenes.find(s => s.id === uxState.activeSceneId) ?? null
+    : null
+
+  let sequence
+  if (activeScene) {
+    for (const s of dataState.scenes) {
+      if ((s.sequence ?? 0) > activeScene.sequence) s.sequence++
+    }
+    sequence = activeScene.sequence + 1
+  } else {
+    sequence = dataState.scenes.length > 0
+      ? Math.max(...dataState.scenes.map(s => s.sequence)) + 1
+      : 1
+  }
 
   const elements = {}
   for (const id of dataState.elementOrder) {
@@ -74,9 +127,9 @@ export function captureScene(name) {
   const scene = {
     id: generateId('scene'),
     sequence,
-    name: name ?? null,       // null = not user-named; display falls back to "Scene N"
-    background: null,         // null = inherit from diagram; string = scene-specific override
-    frame: (n - 1) * 60,
+    name: name ?? `scene_${generateShortId()}`,
+    background: activeScene ? activeScene.background : null,
+    frame: (dataState.scenes.length) * 60,
     elements,
     elementOrder: [...dataState.elementOrder],
     elementStates: Object.fromEntries(
@@ -99,23 +152,31 @@ export function captureScene(name) {
 // Clone a scene and insert it immediately after the source in sequence order.
 export function cloneScene(sourceId) {
   backfillSequences()
-  // Work on a sequence-sorted view to find insertion point
+
+  // Sort first so insertion index is unambiguous
   const sorted = [...dataState.scenes].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
   const sourceIdx = sorted.findIndex(s => s.id === sourceId)
   if (sourceIdx < 0) return null
-  const source = sorted[sourceIdx]
 
+  const src = sorted[sourceIdx]
+
+  // Copy each field explicitly — avoids any proxy/serialization surprises
   const clone = {
-    ...deepClone(source),
-    id: generateId('scene'),
-    name: source.name ? `${source.name} copy` : null,
-    background: source.background ?? null, // explicit so undefined doesn't drop it
+    id:             generateId('scene'),
+    sequence:       0,             // assigned below
+    name:           `scene_${generateShortId()}`,
+    background:     src.background,
+    frame:          src.frame,
+    elements:       JSON.parse(JSON.stringify(src.elements   || {})),
+    elementOrder:   [...(src.elementOrder  || [])],
+    elementStates:  JSON.parse(JSON.stringify(src.elementStates || {})),
   }
-  delete clone.sequence // will be assigned by renumberSequences
 
-  // Insert directly after source in the sorted array, then splice into dataState
+  // Insert clone after source, then reassign sequences 1..N
   sorted.splice(sourceIdx + 1, 0, clone)
   sorted.forEach((s, i) => { s.sequence = i + 1 })
+
+  // Replace scenes array in one shot so Vue sees a single reactive update
   dataState.scenes.splice(0, dataState.scenes.length, ...sorted)
 
   return clone
@@ -127,11 +188,27 @@ export function updateSceneMeta(id, patch) {
 }
 
 export function deleteScene(id) {
-  if (uxState.activeSceneId === id) exitSceneEdit()
+  const wasActive = uxState.activeSceneId === id
+
+  // Find the sorted neighbour to land on before we touch anything
+  const sorted = [...dataState.scenes].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+  const sortedIdx = sorted.findIndex(s => s.id === id)
+  const landOn = wasActive
+    ? (sorted[sortedIdx + 1] ?? sorted[sortedIdx - 1] ?? null)
+    : null
+
+  if (wasActive) exitSceneEdit()
+
   const idx = dataState.scenes.findIndex(s => s.id === id)
-  if (idx >= 0) {
-    dataState.scenes.splice(idx, 1)
-    renumberSequences()
+  if (idx < 0) return
+
+  deletedSceneStack.push({ scene: deepClone(dataState.scenes[idx]), sortedIdx })
+  dataState.scenes.splice(idx, 1)
+  renumberSequences()
+
+  // Re-enter the nearest scene so the UI stays in scene-edit mode
+  if (landOn && dataState.scenes.find(s => s.id === landOn.id)) {
+    enterSceneEdit(landOn.id)
   }
 }
 
