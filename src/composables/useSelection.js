@@ -26,6 +26,89 @@ function snapG(v) {
   return Math.round(v / s) * s
 }
 
+// Return the 6 alignment edges for a bounding box
+function alignEdges(bb) {
+  return {
+    left:   bb.x,
+    right:  bb.x + bb.width,
+    cx:     bb.x + bb.width / 2,
+    top:    bb.y,
+    bottom: bb.y + bb.height,
+    cy:     bb.y + bb.height / 2,
+  }
+}
+
+// Bounding box of a single element's origProps after applying dx/dy
+function movedBB(orig, dx, dy) {
+  const m = { ...orig }
+  if ('x'  in m) m.x  = orig.x  + dx
+  if ('y'  in m) m.y  = orig.y  + dy
+  if ('cx' in m) m.cx = orig.cx + dx
+  if ('cy' in m) m.cy = orig.cy + dy
+  if ('x1' in m) { m.x1 = orig.x1 + dx; m.y1 = orig.y1 + dy }
+  if ('x2' in m) { m.x2 = orig.x2 + dx; m.y2 = orig.y2 + dy }
+  return getBoundingBox(m)
+}
+
+// Compute alignment guides and optional snap corrections for a move drag.
+// Returns { guides, snapDx, snapDy }.
+function computeAlignGuides(dx, dy) {
+  const draggedIds = new Set(Object.keys(_dragOrigPropsMap))
+  const threshold  = 5 / (uxState.canvasZoom || 1)
+
+  // Merge all dragged element bounding boxes at current dx/dy
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const orig of Object.values(_dragOrigPropsMap)) {
+    const b = movedBB(orig, dx, dy)
+    minX = Math.min(minX, b.x);  maxX = Math.max(maxX, b.x + b.width)
+    minY = Math.min(minY, b.y);  maxY = Math.max(maxY, b.y + b.height)
+  }
+  const dEdges = alignEdges({ x: minX, y: minY, width: maxX - minX, height: maxY - minY })
+
+  const guides    = []
+  const seenX     = new Set()
+  const seenY     = new Set()
+  let xCorrection = null, xDist = Infinity
+  let yCorrection = null, yDist = Infinity
+
+  const D_KEYS_X = ['left', 'right', 'cx']
+  const D_KEYS_Y = ['top',  'bottom', 'cy']
+
+  for (const id of dataState.elementOrder) {
+    if (draggedIds.has(id)) continue
+    const el = dataState.elements[id]
+    if (!el || el.locked || el.visible === false) continue
+    const sEdges = alignEdges(getBoundingBox(el))
+
+    for (const dk of D_KEYS_X) {
+      for (const sk of D_KEYS_X) {
+        const dist = Math.abs(dEdges[dk] - sEdges[sk])
+        if (dist < threshold) {
+          const pos = sEdges[sk]
+          if (!seenX.has(pos)) { seenX.add(pos); guides.push({ axis: 'x', pos }) }
+          if (dist < xDist) { xDist = dist; xCorrection = sEdges[sk] - dEdges[dk] }
+        }
+      }
+    }
+    for (const dk of D_KEYS_Y) {
+      for (const sk of D_KEYS_Y) {
+        const dist = Math.abs(dEdges[dk] - sEdges[sk])
+        if (dist < threshold) {
+          const pos = sEdges[sk]
+          if (!seenY.has(pos)) { seenY.add(pos); guides.push({ axis: 'y', pos }) }
+          if (dist < yDist) { yDist = dist; yCorrection = sEdges[sk] - dEdges[dk] }
+        }
+      }
+    }
+  }
+
+  return {
+    guides,
+    snapDx: xCorrection ?? 0,
+    snapDy: yCorrection ?? 0,
+  }
+}
+
 function expandGroup(elementId) {
   const el = dataState.elements[elementId]
   if (!el?.groupId) return [elementId]
@@ -234,7 +317,9 @@ export function useSelection() {
       const dx = svgPoint.x - _dragStartPt.x
       const dy = svgPoint.y - _dragStartPt.y
       if (_dragMode === 'move') {
-        applyTranslationAll(dx, dy)
+        const { guides, snapDx, snapDy } = computeAlignGuides(dx, dy)
+        uxState.alignGuides = guides
+        applyTranslationAll(dx + snapDx, dy + snapDy)
       } else if (_dragMode === 'resize') {
         applyResize(_dragElementId, _dragOrigPropsMap[_dragElementId], dx, dy, _dragHandle)
       } else if (_dragMode === 'endpoint') {
@@ -306,6 +391,7 @@ export function useSelection() {
     }
 
     uxState.dragState.active = false
+    uxState.alignGuides = []
     _dragOrigPropsMap = {}
     _dragStartPt = null
     _dragElementId = null

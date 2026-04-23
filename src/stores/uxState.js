@@ -18,6 +18,7 @@ const defaults = {
   storyboardMode: false,
   activeSceneId: null,
   storyboardZoom: 1,
+  deleteBehavior: 'safe', // 'destructive' | 'non-destructive' | 'safe'
   sessionBg: '',  // overrides project.background for this tab session
   // transient — not persisted
   isPlaying: false,
@@ -36,6 +37,7 @@ const defaults = {
     handle: null,
   },
   editingTextId: null,
+  alignGuides: [],   // transient — [{ axis:'x'|'y', pos:number }]
 }
 
 function loadPersisted() {
@@ -68,7 +70,7 @@ const uxState = reactive({
   ...loadSession(),
 })
 
-const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap', 'storyboardZoom']
+const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap', 'storyboardZoom', 'deleteBehavior']
 const SESSION_KEYS = ['sessionBg']
 
 watch(

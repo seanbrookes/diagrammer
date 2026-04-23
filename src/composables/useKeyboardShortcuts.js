@@ -12,7 +12,6 @@ import { generateId } from '../utils/idgen.js'
 import { undo, redo } from './useHistory.js'
 import { saveProject } from './usePersistence.js'
 import { cancelPen, penState } from './usePen.js'
-import { exitSceneEdit } from '../stores/sceneStore.js'
 
 export function useKeyboardShortcuts() {
   function deleteSelected() {
@@ -118,7 +117,8 @@ export function useKeyboardShortcuts() {
         break
       case 'Delete': case 'Backspace': deleteSelected(); break
       case 'Escape':
-        if (uxState.activeSceneId) { exitSceneEdit(); break }
+        if (uxState.storyboardMode) { uxState.storyboardMode = false; break }
+        if (uxState.activeSceneId) { uxState.storyboardMode = true; break }
         if (penState.active) cancelPen()
         setTool('select'); clearSelection(); break
       case ' ':
