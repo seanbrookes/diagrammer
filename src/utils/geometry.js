@@ -1,3 +1,5 @@
+import { getTextBBox } from './textUtils.js'
+
 export function lerp(a, b, t) {
   return a + (b - a) * t
 }
@@ -19,7 +21,7 @@ export function getBoundingBox(el) {
       return { x, y, width: Math.abs(el.x2 - el.x1), height: Math.abs(el.y2 - el.y1) }
     }
     case 'text':
-      return { x: el.x, y: el.y - (el.fontSize ?? 16), width: 120, height: el.fontSize ?? 16 }
+      return getTextBBox(el)
     case 'path': {
       if (!el.points?.length) return { x: 0, y: 0, width: 0, height: 0 }
       const xs = el.points.map(p => p[0])

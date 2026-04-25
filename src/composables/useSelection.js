@@ -245,6 +245,7 @@ function applyResize(elementId, origProps, dx, dy, handle) {
 
 export function useSelection() {
   function onMouseDown(svgPoint, targetEl) {
+    const elTarget = targetEl?.closest?.('[data-id]') ?? targetEl
     const handle = targetEl?.dataset?.handle
 
     // Endpoint handle (line/arrow p1 or p2)
@@ -277,9 +278,10 @@ export function useSelection() {
     }
 
     // Element click — shift-click adds to selection
-    const elementId = targetEl?.dataset?.elementId ?? hitTest(svgPoint)
+    const elementId = elTarget?.dataset?.id ?? hitTest(svgPoint)
     if (elementId) {
       const shift = targetEl?._shiftKey ?? false
+
       const groupIds = expandGroup(elementId)
       if (shift) {
         // Shift-click toggles the whole group
