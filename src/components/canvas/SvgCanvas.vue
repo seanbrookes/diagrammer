@@ -96,9 +96,9 @@
         style="pointer-events: none; opacity: 0.7"
       />
 
-      <!-- Selection overlays (resize handles) -->
+      <!-- Selection overlays (resize handles) — hidden while text editor is active -->
       <SelectionOverlay
-        v-for="id in selectedIds"
+        v-for="id in selectedIds.filter(id => id !== uxState.editingTextId)"
         :key="id"
         :elementId="id"
       />
@@ -357,7 +357,7 @@ function onDblClick(event) {
     penDblClick()
     return
   }
-  const elementId = event.target?.dataset?.elementId
+  const elementId = event.target?.closest?.('[data-id]')?.dataset?.id
   if (elementId && dataState.elements[elementId]?.type === 'text') {
     uxState.editingTextId = elementId
   }

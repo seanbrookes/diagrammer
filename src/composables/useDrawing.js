@@ -53,7 +53,7 @@ function commitShape() {
   } else if (type === 'text') {
     Object.assign(el, {
       x: startX, y: startY, content: 'Text',
-      fontSize: 18, fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: 16, fontFamily: 'Inter, system-ui, sans-serif',
       fontWeight: 'normal', fill: DEFAULT_FILL.text, opacity: 1,
     })
   } else if (type === 'path') {
@@ -152,7 +152,7 @@ export function useDrawing() {
     } else if (type === 'path' && points.length > 1) {
       return { type, d: pointsToPath(points), stroke: '#333333', strokeWidth: 1.5, fill: 'none', opacity: 1 }
     } else if (type === 'text') {
-      return { type, x: startX, y: startY, content: 'Text', fontSize: 18,
+      return { type, x: startX, y: startY, content: 'Text', fontSize: 16,
         fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 'normal', fill: '#333333', opacity: 0.5 }
     }
     return null

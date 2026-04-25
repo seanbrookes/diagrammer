@@ -1,10 +1,10 @@
 <template>
   <foreignObject
     v-if="visible"
-    :x="el.x"
-    :y="el.y - el.fontSize * 1.2"
-    :width="Math.max(200, textWidth + 20)"
-    :height="el.fontSize * 2.5"
+    :x="el.x - 4"
+    :y="el.y - el.fontSize * 1.15"
+    :width="Math.max(220, maxLineWidth + 32)"
+    :height="editorHeight"
     overflow="visible"
   >
     <textarea
@@ -16,11 +16,10 @@
         fontSize: el.fontSize + 'px',
         fontFamily: el.fontFamily,
         fontWeight: el.fontWeight,
-        color: el.fill,
+        height: editorHeight + 'px',
       }"
       @input="onInput"
       @keydown.esc.stop="commit"
-      @keydown.enter.exact.stop.prevent="commit"
       @blur="commit"
     />
   </foreignObject>
@@ -31,16 +30,22 @@ import { ref, computed, watch, nextTick } from 'vue'
 import dataState, { updateElement } from '../../stores/dataState.js'
 import { syncProxyToElement } from '../../stores/animationStore.js'
 import uxState from '../../stores/uxState.js'
+import { LINE_HEIGHT } from '../../theme.js'
 
 const inputRef = ref(null)
 
 const elementId = computed(() => uxState.editingTextId)
 const visible = computed(() => !!elementId.value && !!dataState.elements[elementId.value])
 const el = computed(() => (elementId.value ? dataState.elements[elementId.value] : null) ?? {
-  x: 0, y: 0, content: '', fontSize: 18, fontFamily: 'sans-serif', fontWeight: 'normal', fill: '#eaeaea',
+  x: 0, y: 0, content: '', fontSize: 16, fontFamily: 'sans-serif', fontWeight: 'normal', fill: '#333333',
 })
 
-const textWidth = computed(() => (el.value?.content?.length ?? 0) * (el.value?.fontSize ?? 18) * 0.6)
+const lines = computed(() => (el.value?.content ?? '').split('\n'))
+const maxLineWidth = computed(() => Math.max(...lines.value.map(l => l.length)) * (el.value?.fontSize ?? 16) * 0.6)
+const editorHeight = computed(() => Math.max(
+  el.value.fontSize * 2.4,
+  lines.value.length * el.value.fontSize * LINE_HEIGHT + 20
+))
 
 function onInput(e) {
   if (!elementId.value) return
@@ -62,10 +67,10 @@ watch(visible, (v) => {
 
 <style>
 .text-edit-input {
-  background: rgba(26, 26, 46, 0.85);
+  background: rgba(30, 40, 58, 0.80);
   border: 1px solid #4a90e2;
   border-radius: 3px;
-  padding: 2px 4px;
+  padding: 3px 6px;
   outline: none;
   resize: none;
   width: 100%;
@@ -73,5 +78,12 @@ watch(visible, (v) => {
   line-height: 1.4;
   box-sizing: border-box;
   overflow: hidden;
+  color: #e6edf3;
+  caret-color: #4a90e2;
+}
+
+.text-edit-input::selection {
+  background: rgba(74, 144, 226, 0.45);
+  color: #ffffff;
 }
 </style>
