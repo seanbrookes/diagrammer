@@ -1,6 +1,7 @@
 <template>
   <header class="toolbar">
-    <div class="toolbar-group">
+    <!-- Desktop tool buttons -->
+    <div class="toolbar-group tool-group">
       <button
         v-for="tool in tools" :key="tool.id"
         class="tool-btn"
@@ -11,6 +12,35 @@
         <span class="tool-icon" v-html="tool.icon" />
       </button>
     </div>
+
+    <!-- Mobile: compact active-tool button -->
+    <button class="mobile-tool-trigger" @click="mobilePickerOpen = true">
+      <span class="tool-icon" v-html="activeToolData.icon" />
+      <span class="mobile-tool-name">{{ activeToolData.label }}</span>
+      <span class="mobile-chevron">▾</span>
+    </button>
+
+    <!-- Mobile tool picker — teleported so it overlays everything -->
+    <Teleport to="body">
+      <Transition name="sheet">
+        <div v-if="mobilePickerOpen" class="tool-sheet-overlay" @click.self="mobilePickerOpen = false">
+          <div class="tool-sheet">
+            <div class="tool-sheet-handle" />
+            <div class="tool-sheet-grid">
+              <button
+                v-for="tool in tools" :key="tool.id"
+                class="tool-sheet-cell"
+                :class="{ active: activeTool === tool.id }"
+                @click="selectMobileTool(tool.id)"
+              >
+                <span class="tool-icon" v-html="tool.icon" />
+                <span class="tool-sheet-label">{{ tool.label }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <div class="toolbar-center">
       <input
@@ -161,6 +191,10 @@ const tools = [
   },
 ]
 
+const activeToolData = computed(() => tools.find(t => t.id === activeTool.value) ?? tools[0])
+const mobilePickerOpen = ref(false)
+function selectMobileTool(id) { setTool(id); mobilePickerOpen.value = false }
+
 function save() { saveProject() }
 function open() { openFilePicker() }
 function exportSvg() { doExportSvg() }
@@ -262,6 +296,29 @@ function onCaptureScene() { captureScene() }
   line-height: 1;
 }
 
+/* Mobile tool trigger — hidden on desktop */
+.mobile-tool-trigger {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.mobile-chevron { font-size: 10px; opacity: 0.5 }
+.mobile-tool-name { font-size: 12px; font-weight: 500 }
+
+@media (max-width: 640px) {
+  .tool-group { display: none }
+  .mobile-tool-trigger { display: flex }
+  .toolbar-center { display: none }
+}
+
 /* Scene selector */
 .scene-selector {
   position: relative;
@@ -334,4 +391,79 @@ function onCaptureScene() { captureScene() }
   transition: background 0.1s, color 0.1s;
 }
 .scene-sel-action:hover { background: var(--surface-2); color: var(--text) }
+</style>
+
+<!-- Global styles for the teleported tool sheet -->
+<style>
+.tool-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+}
+
+.tool-sheet {
+  width: 100%;
+  background: var(--surface, #161b22);
+  border-top: 1px solid var(--border, #30363d);
+  border-radius: 16px 16px 0 0;
+  padding: 0 0 env(safe-area-inset-bottom, 0);
+}
+
+.tool-sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--border, #30363d);
+  border-radius: 2px;
+  margin: 10px auto 8px;
+}
+
+.tool-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border, #30363d);
+  border-top: 1px solid var(--border, #30363d);
+}
+
+.tool-sheet-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 8px;
+  background: var(--surface, #161b22);
+  border: none;
+  color: var(--text-muted, #8b949e);
+  font-size: 22px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.tool-sheet-cell:active { background: var(--surface-2, #21262d) }
+
+.tool-sheet-cell.active {
+  background: rgba(233, 69, 96, 0.12);
+  color: var(--accent, #e94560);
+}
+
+.tool-sheet-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* Sheet slide-up transition */
+.sheet-enter-active { transition: opacity 0.2s ease }
+.sheet-leave-active { transition: opacity 0.15s ease }
+.sheet-enter-from,
+.sheet-leave-to { opacity: 0 }
+
+.sheet-enter-active .tool-sheet { transition: transform 0.25s ease }
+.sheet-leave-active .tool-sheet { transition: transform 0.2s ease }
+.sheet-enter-from .tool-sheet,
+.sheet-leave-to .tool-sheet { transform: translateY(24px) }
 </style>

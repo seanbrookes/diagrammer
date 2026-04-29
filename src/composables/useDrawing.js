@@ -1,6 +1,7 @@
 import { computed } from 'vue'
 import uxState, { clearDrawState, setTool } from '../stores/uxState.js'
 import dataState, { addElement, addKeyframe } from '../stores/dataState.js'
+import { recordSnapshot } from './useHistory.js'
 import { ensureProxy, syncProxyToElement } from '../stores/animationStore.js'
 import { generateId } from '../utils/idgen.js'
 import { rdpSimplify, pointsToPath } from '../utils/svgPath.js'
@@ -24,6 +25,7 @@ const DEFAULT_FILL = { rect: '#a8d5a2', ellipse: '#a8d5a2', line: 'none', arrow:
 const DEFAULT_STROKE = { rect: '#333333', ellipse: '#333333', line: '#333333', arrow: '#333333', text: 'none', path: '#333333' }
 
 function commitShape() {
+  recordSnapshot()
   const { startX, startY, currentX, currentY, points } = uxState.drawState
   const type = uxState.activeTool
   const zIndex = nextZIndex()

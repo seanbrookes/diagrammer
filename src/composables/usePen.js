@@ -1,11 +1,13 @@
 import { reactive } from 'vue'
 import uxState, { setTool } from '../stores/uxState.js'
-import dataState, { addElement, addKeyframe } from '../stores/dataState.js'
+import dataState, { addElement, addKeyframe, updateElement } from '../stores/dataState.js'
+import { recordSnapshot } from './useHistory.js'
 import { ensureProxy, syncProxyToElement } from '../stores/animationStore.js'
 import { generateId } from '../utils/idgen.js'
 import { segmentsToDPath } from '../utils/penPath.js'
 import { collectSnapPoints, findNearestSnap, snapIndicator } from '../utils/snapPoints.js'
 import { extractTweenableProps } from './useDrawing.js'
+import { getSurfaceNormal, tangentArmLength } from '../utils/geometry.js'
 
 const CLOSE_RADIUS = 8
 
@@ -13,6 +15,7 @@ const CLOSE_RADIUS = 8
 let _segments = []
 let _isMouseDown = false
 let _mouseDownPt = null
+let _extendingId = null  // id of existing pen element being extended
 
 export const penState = reactive({
   active: false,
@@ -21,6 +24,7 @@ export const penState = reactive({
   mouseY: 0,
   isDragging: false,
   dragCpOut: null,
+  extendTarget: null,  // {x,y} when hovering near an extendable endpoint
 })
 
 function dist(a, b) {
@@ -41,17 +45,28 @@ function syncPreview() {
 
 function commitPath(closed = false) {
   if (_segments.length < 2) { cancelPen(); return }
+  recordSnapshot()
 
-  const d = segmentsToDPath(_segments, closed)
+  const segments = _segments.map(s => ({ ...s,
+    cpIn: s.cpIn ? { ...s.cpIn } : null,
+    cpOut: s.cpOut ? { ...s.cpOut } : null,
+  }))
+  const d = segmentsToDPath(segments, closed)
+
+  if (_extendingId) {
+    updateElement(_extendingId, { segments, d, closed })
+    syncProxyToElement(_extendingId)
+    cancelPen()
+    setTool('select')
+    return
+  }
+
   const penCount = Object.values(dataState.elements).filter(e => e.type === 'pen').length
   const el = {
     id: generateId('el'),
     type: 'pen',
     label: `Pen ${penCount + 1}`,
-    segments: _segments.map(s => ({ ...s,
-      cpIn: s.cpIn ? { ...s.cpIn } : null,
-      cpOut: s.cpOut ? { ...s.cpOut } : null,
-    })),
+    segments,
     closed,
     d,
     stroke: '#333333',
@@ -76,10 +91,12 @@ export function cancelPen() {
   _segments = []
   _isMouseDown = false
   _mouseDownPt = null
+  _extendingId = null
   penState.active = false
   penState.segments = []
   penState.isDragging = false
   penState.dragCpOut = null
+  penState.extendTarget = null
   snapIndicator.active = false
 }
 
@@ -100,8 +117,6 @@ export function usePen() {
 
   function onMouseDown(pt) {
     const snapped = snapPt(pt)
-    _isMouseDown = true
-    _mouseDownPt = { x: snapped.x, y: snapped.y }
 
     // Click near first point → close path
     if (_segments.length >= 2) {
@@ -111,7 +126,47 @@ export function usePen() {
       }
     }
 
-    _segments.push({ x: snapped.x, y: snapped.y, cpIn: null, cpOut: null })
+    // No path in progress — check if clicking near an existing path's last endpoint to extend it
+    if (_segments.length === 0) {
+      const extendRadius = 16 / Math.max(0.25, uxState.canvasZoom)  // ~16 screen-px
+      const penEls = Object.values(dataState.elements).filter(
+        e => e.type === 'pen' && !e.closed && e.segments?.length >= 1
+      )
+      for (const el of penEls) {
+        const lastSeg = el.segments[el.segments.length - 1]
+        if (dist(snapped, lastSeg) < extendRadius) {
+          _extendingId = el.id
+          _segments = el.segments.map(s => ({
+            ...s,
+            cpIn:  s.cpIn  ? { ...s.cpIn  } : null,
+            cpOut: s.cpOut ? { ...s.cpOut } : null,
+          }))
+          penState.active = true
+          syncPreview()
+          // Last existing segment is now the active anchor; don't add another
+          _isMouseDown = true
+          _mouseDownPt = { x: lastSeg.x, y: lastSeg.y }
+          return
+        }
+      }
+    }
+
+    _isMouseDown = true
+    _mouseDownPt = { x: snapped.x, y: snapped.y }
+
+    // Force tangency: set cpIn/cpOut along the surface normal of the snapped shape
+    let cpIn = null, cpOut = null
+    if (uxState.forceTangency && snapped.elementId) {
+      const target = dataState.elements[snapped.elementId]
+      if (target) {
+        const n   = getSurfaceNormal(target, snapped)
+        const arm = tangentArmLength(target)
+        cpIn  = { x: snapped.x - n.x * arm, y: snapped.y - n.y * arm }
+        cpOut = { x: snapped.x + n.x * arm, y: snapped.y + n.y * arm }
+      }
+    }
+
+    _segments.push({ x: snapped.x, y: snapped.y, cpIn, cpOut })
     penState.active = true
     syncPreview()
   }
@@ -121,6 +176,25 @@ export function usePen() {
     const snapped = (!_isMouseDown) ? snapPt(pt) : pt
     penState.mouseX = snapped.x
     penState.mouseY = snapped.y
+
+    // Show hover ring when near an extendable endpoint (pen not yet active)
+    if (_segments.length === 0 && !_isMouseDown) {
+      const extendRadius = 16 / Math.max(0.25, uxState.canvasZoom)
+      const penEls = Object.values(dataState.elements).filter(
+        e => e.type === 'pen' && !e.closed && e.segments?.length >= 1
+      )
+      let found = null
+      for (const el of penEls) {
+        const lastSeg = el.segments[el.segments.length - 1]
+        if (dist(snapped, lastSeg) < extendRadius) {
+          found = { x: lastSeg.x, y: lastSeg.y }
+          break
+        }
+      }
+      penState.extendTarget = found
+    } else if (!penState.active) {
+      penState.extendTarget = null
+    }
 
     if (_isMouseDown && _mouseDownPt && _segments.length > 0) {
       if (dist(pt, _mouseDownPt) > 3) {

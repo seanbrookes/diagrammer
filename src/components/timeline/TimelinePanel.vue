@@ -1,5 +1,10 @@
 <template>
   <div class="timeline-panel">
+    <div class="timeline-header">
+      <button class="timeline-toggle" @click="uxState.timelineOpen = !uxState.timelineOpen">
+        {{ uxState.timelineOpen ? '▼ Hide Timeline' : '▲ Timeline' }}
+      </button>
+    </div>
     <PlaybackControls />
 
     <div class="timeline-body">
@@ -97,6 +102,31 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
+}
+
+.timeline-header {
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-toggle {
+  height: 100%;
+  padding: 0 14px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+
+.timeline-toggle:hover {
+  color: var(--text);
 }
 
 .timeline-body {

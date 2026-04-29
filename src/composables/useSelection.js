@@ -1,10 +1,12 @@
 import { reactive } from 'vue'
 import uxState, { selectElement, clearSelection } from '../stores/uxState.js'
 import dataState, { updateElement, addKeyframe, groupElements } from '../stores/dataState.js'
+import { recordSnapshot } from './useHistory.js'
 import { elementProxies, syncProxyToElement } from '../stores/animationStore.js'
 import { elementContains, getBoundingBox, rectsIntersect } from '../utils/geometry.js'
 import { collectSnapPoints, findNearestSnap, snapIndicator } from '../utils/snapPoints.js'
 import { extractTweenableProps } from './useDrawing.js'
+import { segmentsToDPath, closestTOnCubic, splitCubicSeg } from '../utils/penPath.js'
 
 // Plain module-level variables — NOT reactive — immune to Vue mid-drag mutation
 let _dragOrigPropsMap = {}   // { elementId: frozenProps } for all dragged elements
@@ -16,6 +18,7 @@ let _dragShift = false
 
 let _marqueeStart = null
 let _lastSnapTargetId = null   // set during endpoint drag when point-snap hits
+let _dragPenBreakSmooth = false
 
 // Reactive so the SVG canvas re-renders the marquee rect as the mouse moves
 export const marquee = reactive({ active: false, x: 0, y: 0, width: 0, height: 0 })
@@ -141,6 +144,21 @@ function applyTranslationOne(elementId, origProps, dx, dy) {
   const proxy = elementProxies[elementId]
   if (!proxy) return
 
+  if (origProps.type === 'pen') {
+    const segments = origProps.segments.map(s => ({
+      ...s,
+      x: s.x + dx,
+      y: s.y + dy,
+      cpIn:  s.cpIn  ? { x: s.cpIn.x  + dx, y: s.cpIn.y  + dy } : null,
+      cpOut: s.cpOut ? { x: s.cpOut.x + dx, y: s.cpOut.y + dy } : null,
+    }))
+    const d = segmentsToDPath(segments, origProps.closed)
+    const patch = { segments, d }
+    Object.assign(proxy, patch)
+    updateElement(elementId, patch)
+    return
+  }
+
   const patch = {}
   if ('x' in origProps)  { patch.x  = snapG(origProps.x  + dx); proxy.x  = patch.x }
   if ('y' in origProps)  { patch.y  = snapG(origProps.y  + dy); proxy.y  = patch.y }
@@ -150,6 +168,104 @@ function applyTranslationOne(elementId, origProps, dx, dy) {
   if ('y1' in origProps) { patch.y1 = snapG(origProps.y1 + dy); proxy.y1 = patch.y1 }
   if ('x2' in origProps) { patch.x2 = snapG(origProps.x2 + dx); proxy.x2 = patch.x2 }
   if ('y2' in origProps) { patch.y2 = snapG(origProps.y2 + dy); proxy.y2 = patch.y2 }
+  updateElement(elementId, patch)
+}
+
+function applyPenPointDrag(elementId, origProps, svgPoint, handle, shiftKey = false) {
+  const proxy = elementProxies[elementId]
+  if (!proxy) return
+
+  const match = handle.match(/^(anchor|cp-out|cp-in)-(\d+)$/)
+  if (!match) return
+  const [, part, idxStr] = match
+  const idx = parseInt(idxStr)
+
+  const segments = origProps.segments.map(s => ({
+    ...s,
+    cpIn:  s.cpIn  ? { ...s.cpIn  } : null,
+    cpOut: s.cpOut ? { ...s.cpOut } : null,
+  }))
+  const seg = segments[idx]
+  const orig = origProps.segments[idx]
+  if (!seg || !orig) return
+
+  let nx = snapG(svgPoint.x)
+  let ny = snapG(svgPoint.y)
+
+  if (part === 'anchor') {
+    if (shiftKey) {
+      const ref = origProps.segments[idx - 1] ?? origProps.segments[idx + 1]
+      if (ref) {
+        const snapped = snapToAxis(ref.x, ref.y, nx, ny)
+        nx = snapped.x; ny = snapped.y
+      }
+    }
+    const ddx = nx - orig.x
+    const ddy = ny - orig.y
+    seg.x = nx
+    seg.y = ny
+    if (seg.cpIn)  { seg.cpIn.x  = orig.cpIn.x  + ddx; seg.cpIn.y  = orig.cpIn.y  + ddy }
+    if (seg.cpOut) { seg.cpOut.x = orig.cpOut.x + ddx; seg.cpOut.y = orig.cpOut.y + ddy }
+  } else if (part === 'cp-out') {
+    seg.cpOut = { x: nx, y: ny }
+    if (_dragPenBreakSmooth) {
+      seg.smooth = false
+    } else if (seg.smooth !== false && seg.cpIn) {
+      seg.cpIn = { x: 2 * seg.x - nx, y: 2 * seg.y - ny }
+    }
+  } else if (part === 'cp-in') {
+    seg.cpIn = { x: nx, y: ny }
+    if (_dragPenBreakSmooth) {
+      seg.smooth = false
+    } else if (seg.smooth !== false && seg.cpOut) {
+      seg.cpOut = { x: 2 * seg.x - nx, y: 2 * seg.y - ny }
+    }
+  }
+
+  const d = segmentsToDPath(segments, origProps.closed)
+  const patch = { segments, d }
+  Object.assign(proxy, patch)
+  updateElement(elementId, patch)
+}
+
+function togglePenAnchorSmooth(elementId, el, idx) {
+  const segments = el.segments.map(s => ({
+    ...s,
+    cpIn:  s.cpIn  ? { ...s.cpIn  } : null,
+    cpOut: s.cpOut ? { ...s.cpOut } : null,
+  }))
+  const seg = segments[idx]
+  if (!seg) return
+
+  if (seg.cpOut || seg.cpIn) {
+    seg.cpIn  = null
+    seg.cpOut = null
+    seg.smooth = false
+  } else {
+    const prev = idx > 0 ? segments[idx - 1] : segments[segments.length - 1]
+    const next = idx < segments.length - 1 ? segments[idx + 1] : segments[0]
+    const ARM = 30
+    if (prev !== seg && next !== seg) {
+      const dx = next.x - prev.x
+      const dy = next.y - prev.y
+      const len = Math.sqrt(dx * dx + dy * dy) || 1
+      seg.cpOut = { x: seg.x + dx / len * ARM, y: seg.y + dy / len * ARM }
+      seg.cpIn  = { x: seg.x - dx / len * ARM, y: seg.y - dy / len * ARM }
+    } else if (next !== seg) {
+      const dx = next.x - seg.x
+      const dy = next.y - seg.y
+      const len = Math.sqrt(dx * dx + dy * dy) || 1
+      const scale = Math.min(ARM, len / 3)
+      seg.cpOut = { x: seg.x + dx / len * scale, y: seg.y + dy / len * scale }
+      seg.cpIn  = { x: seg.x - dx / len * scale, y: seg.y - dy / len * scale }
+    }
+    seg.smooth = true
+  }
+
+  const d = segmentsToDPath(segments, el.closed)
+  const patch = { segments, d }
+  const proxy = elementProxies[elementId]
+  if (proxy) Object.assign(proxy, patch)
   updateElement(elementId, patch)
 }
 
@@ -243,15 +359,121 @@ function applyResize(elementId, origProps, dx, dy, handle) {
   updateElement(elementId, patch)
 }
 
+function removePenAnchor(elementId, el, idx) {
+  if (el.segments.length <= 2) return
+  const segments = el.segments
+    .filter((_, i) => i !== idx)
+    .map(s => ({ ...s, cpIn: s.cpIn ? { ...s.cpIn } : null, cpOut: s.cpOut ? { ...s.cpOut } : null }))
+  const d = segmentsToDPath(segments, el.closed)
+  const patch = { segments, d }
+  const proxy = elementProxies[elementId]
+  if (proxy) Object.assign(proxy, patch)
+  updateElement(elementId, patch)
+}
+
+function insertPenAnchor(elementId, el, pt) {
+  const segs = el.segments
+  const n = segs.length
+  const segCount = el.closed ? n : n - 1
+  if (segCount < 1) return
+
+  let bestT = 0.5, bestSegIdx = 0, bestDist = Infinity
+  for (let i = 0; i < segCount; i++) {
+    const a = segs[i]
+    const b = segs[(i + 1) % n]
+    const cp1 = a.cpOut ?? { x: a.x, y: a.y }
+    const cp2 = b.cpIn  ?? { x: b.x, y: b.y }
+    const { t, dist } = closestTOnCubic(pt, a, cp1, cp2, b)
+    if (dist < bestDist) { bestDist = dist; bestSegIdx = i; bestT = t }
+  }
+
+  const newSegs = segs.map(s => ({
+    ...s, cpIn: s.cpIn ? { ...s.cpIn } : null, cpOut: s.cpOut ? { ...s.cpOut } : null,
+  }))
+  const a = newSegs[bestSegIdx]
+  const bIdx = (bestSegIdx + 1) % n
+  const b = newSegs[bIdx]
+  const cp1 = a.cpOut ?? { x: a.x, y: a.y }
+  const cp2 = b.cpIn  ?? { x: b.x, y: b.y }
+  const [newA, newMid, newB] = splitCubicSeg(a, cp1, cp2, b, bestT)
+  newSegs[bestSegIdx] = newA
+  newSegs[bIdx] = newB
+  newSegs.splice(bestSegIdx + 1, 0, newMid)
+
+  const d = segmentsToDPath(newSegs, el.closed)
+  const patch = { segments: newSegs, d }
+  const proxy = elementProxies[elementId]
+  if (proxy) Object.assign(proxy, patch)
+  updateElement(elementId, patch)
+}
+
+function deepFreezePen(el) {
+  return Object.freeze({
+    ...el,
+    segments: el.segments.map(s => ({
+      ...s,
+      cpIn:  s.cpIn  ? { ...s.cpIn  } : null,
+      cpOut: s.cpOut ? { ...s.cpOut } : null,
+    })),
+  })
+}
+
 export function useSelection() {
   function onMouseDown(svgPoint, targetEl) {
     const elTarget = targetEl?.closest?.('[data-id]') ?? targetEl
     const handle = targetEl?.dataset?.handle
+    const penHandle = targetEl?.dataset?.penHandle
+
+    // ── Pen edit mode ─────────────────────────────────────────────────────────
+    if (uxState.editingPenId) {
+      if (penHandle) {
+        const elId = uxState.editingPenId
+        const el = dataState.elements[elId]
+        if (!el) { uxState.editingPenId = null; return }
+
+        // Alt+click on anchor → remove that point
+        if (targetEl?._altKey && penHandle.startsWith('anchor-')) {
+          recordSnapshot()
+          removePenAnchor(elId, el, parseInt(penHandle.slice(7)))
+          return
+        }
+
+        // Ctrl+click on anchor → toggle smooth/corner
+        if (targetEl?._ctrlKey && penHandle.startsWith('anchor-')) {
+          recordSnapshot()
+          togglePenAnchorSmooth(elId, el, parseInt(penHandle.slice(7)))
+          return
+        }
+
+        // Alt+drag on cp handle → move independently (break smooth mirror)
+        _dragPenBreakSmooth = !!(targetEl?._altKey && (penHandle.startsWith('cp-out-') || penHandle.startsWith('cp-in-')))
+
+        recordSnapshot()
+        _dragOrigPropsMap = { [elId]: deepFreezePen(el) }
+        _dragStartPt = { x: svgPoint.x, y: svgPoint.y }
+        _dragElementId = elId
+        _dragMode = 'pen-point'
+        _dragHandle = penHandle
+        uxState.dragState.active = true
+        return
+      }
+
+      // Alt+click on the path body → insert a new anchor at the closest point on the segment
+      const clickedId = elTarget?.dataset?.id
+      if (targetEl?._altKey && clickedId === uxState.editingPenId) {
+        const el = dataState.elements[clickedId]
+        if (el) { recordSnapshot(); insertPenAnchor(clickedId, el, svgPoint); return }
+      }
+
+      // Clicked outside pen handles → exit edit mode, fall through to normal selection
+      uxState.editingPenId = null
+    }
 
     // Endpoint handle (line/arrow p1 or p2)
     if ((handle === 'p1' || handle === 'p2') && uxState.selectedIds.length) {
       const id = uxState.selectedIds[0]
       const el = dataState.elements[id]
+      recordSnapshot()
       _dragOrigPropsMap = { [id]: Object.freeze({ ...el }) }
       _dragStartPt = { x: svgPoint.x, y: svgPoint.y }
       _dragElementId = id
@@ -267,6 +489,7 @@ export function useSelection() {
     if (handle && uxState.selectedIds.length) {
       const id = uxState.selectedIds[0]
       const el = dataState.elements[id]
+      recordSnapshot()
       _dragOrigPropsMap = { [id]: Object.freeze({ ...el }) }
       _dragStartPt = { x: svgPoint.x, y: svgPoint.y }
       _dragElementId = id
@@ -284,17 +507,20 @@ export function useSelection() {
 
       const groupIds = expandGroup(elementId)
       if (shift) {
-        // Shift-click toggles the whole group
         for (const id of groupIds) selectElement(id, true)
       } else if (!uxState.selectedIds.includes(elementId)) {
-        // Select entire group at once
         uxState.selectedIds = groupIds
       }
-      // Snapshot origProps for every selected element
+      // Deep-freeze pen elements so their segments snapshot is stable across the drag
+      recordSnapshot()
       _dragOrigPropsMap = {}
       for (const id of uxState.selectedIds) {
         const el = dataState.elements[id]
-        if (el) _dragOrigPropsMap[id] = Object.freeze({ ...el })
+        if (el) {
+          _dragOrigPropsMap[id] = el.type === 'pen'
+            ? deepFreezePen(el)
+            : Object.freeze({ ...el })
+        }
       }
       _dragStartPt = { x: svgPoint.x, y: svgPoint.y }
       _dragElementId = elementId
@@ -327,6 +553,8 @@ export function useSelection() {
       } else if (_dragMode === 'endpoint') {
         _dragShift = shiftKey
         applyEndpoint(_dragElementId, _dragOrigPropsMap[_dragElementId], svgPoint, _dragHandle, _dragShift)
+      } else if (_dragMode === 'pen-point') {
+        applyPenPointDrag(_dragElementId, _dragOrigPropsMap[_dragElementId], svgPoint, _dragHandle, shiftKey)
       }
       return
     }
@@ -398,6 +626,7 @@ export function useSelection() {
     _dragStartPt = null
     _dragElementId = null
     _lastSnapTargetId = null
+    _dragPenBreakSmooth = false
     snapIndicator.active = false
     snapIndicator.elementId = null
 
