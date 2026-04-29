@@ -64,7 +64,7 @@
       <section class="prop-section" v-if="el.fill !== undefined && el.fill !== 'none'">
         <div class="prop-row">
           <label>Fill</label>
-          <input type="color" :value="el.fill" @input="patch({ fill: $event.target.value })" />
+          <input type="color" :value="el.fill" @mousedown="onLiveInputStart" @input="patch({ fill: $event.target.value }, true)" />
           <span class="color-hex">{{ el.fill }}</span>
         </div>
       </section>
@@ -72,7 +72,7 @@
       <section class="prop-section" v-if="el.stroke !== undefined && el.stroke !== 'none'">
         <div class="prop-row">
           <label>Stroke</label>
-          <input type="color" :value="el.stroke" @input="patch({ stroke: $event.target.value })" />
+          <input type="color" :value="el.stroke" @mousedown="onLiveInputStart" @input="patch({ stroke: $event.target.value }, true)" />
           <span class="color-hex">{{ el.stroke }}</span>
         </div>
         <div class="prop-row">
@@ -88,7 +88,7 @@
           <label>Opacity</label>
           <input type="range" min="0" max="1" step="0.01"
             :value="el.opacity ?? 1"
-            @input="patch({ opacity: +$event.target.value })" />
+            @mousedown="onLiveInputStart" @input="patch({ opacity: +$event.target.value }, true)" />
           <span class="color-hex">{{ Math.round((el.opacity ?? 1) * 100) }}%</span>
         </div>
       </section>
@@ -250,17 +250,38 @@
             @change="uxState.autoGroupOnSnap = $event.target.checked" />
           <span class="toggle-label" style="flex:1">Group on snap</span>
         </div>
+        <div class="prop-row" :style="{ opacity: uxState.pointSnap ? 1 : 0.4 }">
+          <label>Tangency</label>
+          <input type="checkbox" :checked="uxState.forceTangency" :disabled="!uxState.pointSnap"
+            @change="uxState.forceTangency = $event.target.checked" />
+          <span class="toggle-label" style="flex:1">Force tangent on pen snap</span>
+        </div>
       </section>
 
       <section class="prop-section">
         <div class="prop-row">
           <label>Zoom</label>
-          <input type="range" min="0.1" max="4" step="0.05"
+          <input type="range" min="0.1" max="20" step="0.1"
             :value="canvasZoom"
             @input="setZoom(+$event.target.value)" />
           <span class="color-hex">{{ Math.round(canvasZoom * 100) }}%</span>
         </div>
         <button class="preset-btn" style="width:100%" @click="fitToScreen">Fit to screen</button>
+        <div class="prop-row">
+          <label>Scroll</label>
+          <input type="checkbox" :checked="uxState.invertScrollZoom"
+            @change="uxState.invertScrollZoom = $event.target.checked" />
+          <span class="toggle-label">Invert zoom direction</span>
+        </div>
+      </section>
+
+      <section class="prop-section">
+        <div class="prop-row">
+          <label>Timeline</label>
+          <input type="checkbox" :checked="uxState.showTimelineOnLoad"
+            @change="uxState.showTimelineOnLoad = $event.target.checked" />
+          <span class="toggle-label">Show on load</span>
+        </div>
       </section>
 
       <section class="prop-section">
@@ -287,6 +308,7 @@ import { updateSceneMeta, deleteScene, sceneLabel } from '../../stores/sceneStor
 import { generateShortId } from '../../utils/idgen.js'
 import { syncProxyToElement } from '../../stores/animationStore.js'
 import { extractTweenableProps } from '../../composables/useDrawing.js'
+import { recordSnapshot } from '../../composables/useHistory.js'
 
 const grid = uxState.grid
 const primaryId = computed(() => uxState.selectedIds[0] ?? null)
@@ -326,18 +348,35 @@ const currentFrame = computed(() => Math.round(uxState.currentFrame))
 
 function round(v) { return typeof v === 'number' ? Math.round(v * 10) / 10 : v }
 
-function patch(p) {
+// For continuous inputs (color, opacity): snapshot once per interaction start,
+// then apply live updates without snapshotting on each pixel.
+let _liveSnapshotDone = false
+
+function onLiveInputStart() {
+  _liveSnapshotDone = false
+}
+
+function patch(p, isLive = false) {
   if (!primaryId.value) return
+  if (isLive) {
+    if (!_liveSnapshotDone) { recordSnapshot(); _liveSnapshotDone = true }
+  } else {
+    recordSnapshot()
+  }
   updateElement(primaryId.value, p)
   syncProxyToElement(primaryId.value)
 }
 
 function patchProject(p) {
+  recordSnapshot()
   updateProject(p)
 }
 
 function patchScene(patch) {
-  if (activeScene.value) updateSceneMeta(activeScene.value.id, patch)
+  if (activeScene.value) {
+    recordSnapshot()
+    updateSceneMeta(activeScene.value.id, patch)
+  }
 }
 
 function onDeleteScene() {
@@ -346,6 +385,7 @@ function onDeleteScene() {
   if (uxState.deleteBehavior === 'safe') {
     if (!window.confirm(`Delete "${sceneLabel(scene)}"?`)) return
   }
+  recordSnapshot()
   deleteScene(scene.id)
 }
 
@@ -355,7 +395,7 @@ function setZoom(v) {
 
 function fitToScreen() {
   // Estimate available canvas area (minus padding)
-  const containerW = window.innerWidth - 240 - 80  // minus props panel and padding
+  const containerW = window.innerWidth - uxState.propsPanelWidth - 80  // minus props panel and padding
   const containerH = window.innerHeight - 48 - 220 - 80  // minus toolbar, timeline, padding
   const scaleW = containerW / project.value.canvasWidth
   const scaleH = containerH / project.value.canvasHeight
@@ -398,9 +438,18 @@ const toolHints = [
   background: var(--surface);
   border-left: 1px solid var(--border);
   overflow-y: auto;
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+.properties-panel::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .properties-panel { display: none }
 }
 
 .panel-title {

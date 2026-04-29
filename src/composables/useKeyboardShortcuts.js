@@ -9,12 +9,14 @@ import { elementProxies, removeProxy, seekToFrame, play, pause } from '../stores
 import { updateElement, addKeyframe } from '../stores/dataState.js'
 import { extractTweenableProps } from './useDrawing.js'
 import { generateId } from '../utils/idgen.js'
-import { undo, redo } from './useHistory.js'
+import { undo, redo, recordSnapshot } from './useHistory.js'
 import { saveProject } from './usePersistence.js'
 import { cancelPen, penState } from './usePen.js'
 
 export function useKeyboardShortcuts() {
   function deleteSelected() {
+    if (!uxState.selectedIds.length) return
+    recordSnapshot()
     for (const id of uxState.selectedIds) {
       removeElement(id)
       removeProxy(id)
@@ -23,6 +25,8 @@ export function useKeyboardShortcuts() {
   }
 
   function duplicateSelected() {
+    if (!uxState.selectedIds.length) return
+    recordSnapshot()
     const newIds = []
     for (const id of uxState.selectedIds) {
       const el = dataState.elements[id]
@@ -48,8 +52,9 @@ export function useKeyboardShortcuts() {
     uxState.selectedIds = newIds
   }
 
-  function nudgeSelected(dx, dy) {
+  function nudgeSelected(dx, dy, isRepeat = false) {
     if (!uxState.selectedIds.length) return false
+    if (!isRepeat) recordSnapshot()
     const frame = Math.round(uxState.currentFrame)
     for (const id of uxState.selectedIds) {
       const el = dataState.elements[id]
@@ -85,19 +90,19 @@ export function useKeyboardShortcuts() {
     if (ctrl && e.key === ']') {
       e.preventDefault()
       const id = uxState.selectedIds[0]
-      if (id) e.shiftKey ? bringToFront(id) : bringForward(id)
+      if (id) { recordSnapshot(); e.shiftKey ? bringToFront(id) : bringForward(id) }
       return
     }
     if (ctrl && e.key === '[') {
       e.preventDefault()
       const id = uxState.selectedIds[0]
-      if (id) e.shiftKey ? sendToBack(id) : sendBackward(id)
+      if (id) { recordSnapshot(); e.shiftKey ? sendToBack(id) : sendBackward(id) }
       return
     }
     if (ctrl && e.key === 'g') {
       e.preventDefault()
-      if (e.shiftKey) ungroupElements(uxState.selectedIds)
-      else if (uxState.selectedIds.length > 1) groupElements(uxState.selectedIds)
+      if (e.shiftKey && uxState.selectedIds.length) { recordSnapshot(); ungroupElements(uxState.selectedIds) }
+      else if (uxState.selectedIds.length > 1) { recordSnapshot(); groupElements(uxState.selectedIds) }
       return
     }
 
@@ -117,6 +122,7 @@ export function useKeyboardShortcuts() {
         break
       case 'Delete': case 'Backspace': deleteSelected(); break
       case 'Escape':
+        if (uxState.editingPenId) { uxState.editingPenId = null; break }
         if (uxState.storyboardMode) { uxState.storyboardMode = false; break }
         if (uxState.activeSceneId) { uxState.storyboardMode = true; break }
         if (penState.active) cancelPen()
@@ -127,21 +133,21 @@ export function useKeyboardShortcuts() {
         break
       case 'ArrowLeft':
         e.preventDefault()
-        if (!nudgeSelected(-1, 0))
+        if (!nudgeSelected(-1, 0, e.repeat))
           seekToFrame(Math.max(0, Math.round(uxState.currentFrame) - 1))
         break
       case 'ArrowRight':
         e.preventDefault()
-        if (!nudgeSelected(1, 0))
+        if (!nudgeSelected(1, 0, e.repeat))
           seekToFrame(Math.min(dataState.project.totalFrames, Math.round(uxState.currentFrame) + 1))
         break
       case 'ArrowUp':
         e.preventDefault()
-        nudgeSelected(0, -1)
+        nudgeSelected(0, -1, e.repeat)
         break
       case 'ArrowDown':
         e.preventDefault()
-        nudgeSelected(0, 1)
+        nudgeSelected(0, 1, e.repeat)
         break
     }
   }

@@ -1,5 +1,5 @@
 <template>
-  <div class="canvas-container" @wheel.ctrl.prevent="onCtrlWheel">
+  <div class="canvas-container" ref="containerRef" @wheel.ctrl.prevent="onCtrlWheel">
     <!-- Scene nav: prev -->
     <div v-if="prevScene" class="scene-nav scene-nav-left" @click="goToScene(prevScene.id)">
       <span class="scene-nav-arrow">←</span>
@@ -46,6 +46,7 @@
         background: effectiveBg,
         cursor: cursorStyle,
         display: 'block',
+        touchAction: 'none',
       }"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
@@ -164,7 +165,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import dataState from '../../stores/dataState.js'
 import {
   bringToFront, bringForward, sendBackward, sendToBack,
@@ -183,13 +184,26 @@ import PenPreview from './PenPreview.vue'
 import ContextMenu from './ContextMenu.vue'
 import TextEditor from './TextEditor.vue'
 import { syncProxyToElement, removeProxy } from '../../stores/animationStore.js'
+import { recordSnapshot } from '../../composables/useHistory.js'
 import { clearSelection } from '../../stores/uxState.js'
 import { snapIndicator } from '../../utils/snapPoints.js'
 import { useSnapshot, snapshotRect } from '../../composables/useSnapshot.js'
 import { exitSceneEdit, enterSceneEdit, captureToast, sceneLabel } from '../../stores/sceneStore.js'
 
 const svgRef = ref(null)
+const containerRef = ref(null)
 const ctxMenu = reactive({ visible: false, x: 0, y: 0 })
+
+// ── Shift+drag canvas pan ──────────────────────────────────────────────────────
+const panning = ref(false)
+let _panStartX = 0, _panStartY = 0
+let _panScrollLeft = 0, _panScrollTop = 0
+
+function isCanvasBackground(target) {
+  return !target?.closest?.('[data-id]') &&
+         !target?.dataset?.handle &&
+         !target?.dataset?.penHandle
+}
 
 function onContextMenu(event) {
   if (!selectedIds.value.length) return
@@ -203,6 +217,7 @@ function closeContextMenu() { ctxMenu.visible = false }
 function handleContextAction(action) {
   const ids = uxState.selectedIds
   const primary = ids[0]
+  recordSnapshot()
   switch (action) {
     case 'flipH':        ids.forEach(id => { flipHorizontal(id); syncProxyToElement(id) }); break
     case 'flipV':        ids.forEach(id => { flipVertical(id);   syncProxyToElement(id) }); break
@@ -223,8 +238,96 @@ function onClickOutsideMenu(e) {
   if (ctxMenu.visible) closeContextMenu()
 }
 
-onMounted(() => document.addEventListener('mousedown', onClickOutsideMenu))
-onUnmounted(() => document.removeEventListener('mousedown', onClickOutsideMenu))
+// ── Touch support ─────────────────────────────────────────────────────────────
+// Normalises touch events into the same shape as mouse events and routes them
+// through the existing handlers so composables need no changes.
+
+let _lastTouchEndTime = 0
+let _pinchStartDist = 0
+let _pinchStartZoom = 0
+
+function isFormTarget(el) {
+  const tag = el?.tagName
+  return tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT'
+}
+
+function onTouchStart(event) {
+  // Let native focus/keyboard handling work for form elements
+  if (isFormTarget(event.target)) return
+  event.preventDefault()
+
+  if (event.touches.length === 2) {
+    const t0 = event.touches[0], t1 = event.touches[1]
+    _pinchStartDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY)
+    _pinchStartZoom = uxState.canvasZoom
+    return
+  }
+
+  if (event.touches.length !== 1) return
+  const touch = event.touches[0]
+
+  // Double-tap → dblclick equivalent
+  if (Date.now() - _lastTouchEndTime < 300) {
+    _lastTouchEndTime = 0
+    if (activeTool.value === 'pen' || penState.active) {
+      penDblClick()
+    } else {
+      const tgt = document.elementFromPoint(touch.clientX, touch.clientY)
+      const elementId = tgt?.closest?.('[data-id]')?.dataset?.id
+      if (elementId && dataState.elements[elementId]?.type === 'text') {
+        uxState.editingTextId = elementId
+      }
+    }
+    return
+  }
+
+  const target = document.elementFromPoint(touch.clientX, touch.clientY) ?? svgRef.value
+  target._shiftKey = false
+  onMouseDown({ clientX: touch.clientX, clientY: touch.clientY, target, shiftKey: false })
+}
+
+function onTouchMove(event) {
+  if (isFormTarget(event.target)) return
+  event.preventDefault()
+
+  if (event.touches.length === 2) {
+    const t0 = event.touches[0], t1 = event.touches[1]
+    const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY)
+    uxState.canvasZoom = Math.max(0.1, Math.min(MAX_ZOOM, _pinchStartZoom * (dist / _pinchStartDist)))
+    return
+  }
+
+  if (event.touches.length !== 1) return
+  const touch = event.touches[0]
+  onMouseMove({ clientX: touch.clientX, clientY: touch.clientY, shiftKey: false })
+}
+
+function onTouchEnd(event) {
+  if (isFormTarget(event.target)) return
+  event.preventDefault()
+  _lastTouchEndTime = Date.now()
+  onMouseUp()
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onClickOutsideMenu)
+  const svg = svgRef.value
+  svg.addEventListener('touchstart',  onTouchStart, { passive: false })
+  svg.addEventListener('touchmove',   onTouchMove,  { passive: false })
+  svg.addEventListener('touchend',    onTouchEnd,   { passive: false })
+  svg.addEventListener('touchcancel', onTouchEnd,   { passive: false })
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onClickOutsideMenu)
+  const svg = svgRef.value
+  if (svg) {
+    svg.removeEventListener('touchstart',  onTouchStart)
+    svg.removeEventListener('touchmove',   onTouchMove)
+    svg.removeEventListener('touchend',    onTouchEnd)
+    svg.removeEventListener('touchcancel', onTouchEnd)
+  }
+})
 
 const project = computed(() => dataState.project)
 const canvasZoom = computed(() => uxState.canvasZoom)
@@ -277,9 +380,14 @@ const { onMouseDown: snapDown, onMouseMove: snapMove, onMouseUp: snapUp, onMouse
 
 const DRAWING_TOOLS = ['rect', 'ellipse', 'line', 'arrow', 'text', 'path']
 
+// Clear extend-hover indicator when switching away from pen tool
+watch(() => uxState.activeTool, tool => {
+  if (tool !== 'pen') penState.extendTarget = null
+})
+
 const cursorStyle = computed(() => {
   if (DRAWING_TOOLS.includes(activeTool.value) || activeTool.value === 'pen' || activeTool.value === 'snapshot') return 'crosshair'
-  if (uxState.dragState.active) return 'grabbing'
+  if (panning.value || uxState.dragState.active) return 'grabbing'
   return 'default'
 })
 
@@ -305,12 +413,31 @@ function onMouseDown(event) {
     drawDown(pt)
   } else {
     const target = event.target
+    // Shift+drag on empty canvas → pan
+    if (event.shiftKey && isCanvasBackground(target)) {
+      panning.value = true
+      _panStartX    = event.clientX
+      _panStartY    = event.clientY
+      _panScrollLeft = containerRef.value?.scrollLeft ?? 0
+      _panScrollTop  = containerRef.value?.scrollTop  ?? 0
+      return
+    }
     target._shiftKey = event.shiftKey
+    target._ctrlKey  = event.ctrlKey || event.metaKey
+    target._altKey   = event.altKey
     selectDown(pt, target)
   }
 }
 
 function onMouseMove(event) {
+  if (panning.value) {
+    const c = containerRef.value
+    if (c) {
+      c.scrollLeft = _panScrollLeft - (event.clientX - _panStartX)
+      c.scrollTop  = _panScrollTop  - (event.clientY - _panStartY)
+    }
+    return
+  }
   const pt = getSvgPoint(event)
   if (activeTool.value === 'snapshot' || snapshotRect.active) {
     snapMove(pt)
@@ -324,6 +451,7 @@ function onMouseMove(event) {
 }
 
 function onMouseUp() {
+  if (panning.value) { panning.value = false; return }
   if (snapshotRect.active) {
     snapUp()
   } else if (penState.active) {
@@ -336,20 +464,47 @@ function onMouseUp() {
 }
 
 function onMouseLeave() {
+  if (panning.value) { panning.value = false; return }
   if (snapshotRect.active) snapLeave()
   if (uxState.drawState.active) drawUp()
   if (uxState.dragState.active) selectUp()
   // Don't cancel pen on mouseleave — user may move back onto canvas
 }
 
-function onCtrlWheel(event) {
-  const delta = event.deltaY > 0 ? -0.1 : 0.1
+const MAX_ZOOM = 20
+
+async function onCtrlWheel(event) {
+  const c = containerRef.value
+  const svg = svgRef.value
+  if (!c || !svg) return
+
+  const dir = uxState.invertScrollZoom ? -1 : 1
+  const step = uxState.canvasZoom < 2 ? 0.1 : uxState.canvasZoom < 5 ? 0.25 : 0.5
+  const delta = (event.deltaY > 0 ? -step : step) * dir
   const next = uxState.canvasZoom + delta
+
   if (next < 0.1 && dataState.scenes.length > 0) {
     uxState.storyboardMode = true
     return
   }
-  uxState.canvasZoom = Math.max(0.1, Math.min(4, next))
+
+  // Record where the cursor sits within the SVG (as a 0–1 fraction) and
+  // where it sits within the container viewport, before the zoom changes.
+  const svgRect = svg.getBoundingClientRect()
+  const cRect   = c.getBoundingClientRect()
+  const fracX   = (event.clientX - svgRect.left) / svgRect.width
+  const fracY   = (event.clientY - svgRect.top)  / svgRect.height
+  const cursorX = event.clientX - cRect.left
+  const cursorY = event.clientY - cRect.top
+
+  uxState.canvasZoom = Math.max(0.1, Math.min(MAX_ZOOM, next))
+
+  // After Vue re-renders the resized SVG, shift the scroll so the same SVG
+  // point stays under the cursor.
+  await nextTick()
+  const newSvgRect = svg.getBoundingClientRect()
+  c.scrollLeft += (newSvgRect.left + fracX * newSvgRect.width)  - (cRect.left + cursorX)
+  c.scrollTop  += (newSvgRect.top  + fracY * newSvgRect.height) - (cRect.top  + cursorY)
 }
 
 function onDblClick(event) {
@@ -358,8 +513,21 @@ function onDblClick(event) {
     return
   }
   const elementId = event.target?.closest?.('[data-id]')?.dataset?.id
-  if (elementId && dataState.elements[elementId]?.type === 'text') {
-    uxState.editingTextId = elementId
+  // Fallback: thin pen strokes are hard to hit precisely — if a single pen element
+  // is already selected, any double-click enters edit mode for it.
+  const resolvedId = elementId ?? (
+    uxState.selectedIds.length === 1 &&
+    dataState.elements[uxState.selectedIds[0]]?.type === 'pen'
+      ? uxState.selectedIds[0]
+      : null
+  )
+  if (!resolvedId) return
+  const el = dataState.elements[resolvedId]
+  if (el?.type === 'text') {
+    uxState.editingTextId = resolvedId
+  } else if (el?.type === 'pen') {
+    uxState.editingPenId = resolvedId
+    if (!uxState.selectedIds.includes(resolvedId)) uxState.selectedIds = [resolvedId]
   }
 }
 </script>
@@ -490,5 +658,11 @@ function onDblClick(event) {
   flex-shrink: 0;
   box-shadow: 0 4px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
   border-radius: 2px;
+}
+
+@media (max-width: 640px) {
+  .canvas-container {
+    padding: 8px;
+  }
 }
 </style>

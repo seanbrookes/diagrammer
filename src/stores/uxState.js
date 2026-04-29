@@ -15,10 +15,15 @@ const defaults = {
   grid: { visible: false, spacing: 20, snap: false },
   pointSnap: false,
   autoGroupOnSnap: false,
+  forceTangency: false,
   storyboardMode: false,
   activeSceneId: null,
   storyboardZoom: 1,
   deleteBehavior: 'safe', // 'destructive' | 'non-destructive' | 'safe'
+  propsPanelWidth: 240,
+  invertScrollZoom: false,
+  showTimelineOnLoad: false,
+  timelineOpen: false,
   sessionBg: '',  // overrides project.background for this tab session
   // transient — not persisted
   isPlaying: false,
@@ -37,16 +42,18 @@ const defaults = {
     handle: null,
   },
   editingTextId: null,
+  editingPenId: null,
   alignGuides: [],   // transient — [{ axis:'x'|'y', pos:number }]
 }
+
+const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap', 'forceTangency', 'storyboardZoom', 'deleteBehavior', 'propsPanelWidth', 'invertScrollZoom', 'showTimelineOnLoad']
 
 function loadPersisted() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
     const saved = JSON.parse(raw)
-    const allowed = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap']
-    return Object.fromEntries(allowed.filter(k => k in saved).map(k => [k, saved[k]]))
+    return Object.fromEntries(PERSIST_KEYS.filter(k => k in saved).map(k => [k, saved[k]]))
   } catch {
     return {}
   }
@@ -70,7 +77,8 @@ const uxState = reactive({
   ...loadSession(),
 })
 
-const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap', 'storyboardZoom', 'deleteBehavior']
+uxState.timelineOpen = uxState.showTimelineOnLoad
+
 const SESSION_KEYS = ['sessionBg']
 
 watch(
@@ -93,6 +101,7 @@ watch(
 
 export function setTool(tool) {
   uxState.activeTool = tool
+  uxState.editingPenId = null
   clearDrawState()
 }
 
