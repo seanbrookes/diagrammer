@@ -129,6 +129,7 @@
           <line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
       </button>
+      <button class="tool-btn about-btn" title="About" @click="uxState.showAbout = true">?</button>
     </div>
   </header>
 </template>
@@ -198,7 +199,12 @@ function selectMobileTool(id) { setTool(id); mobilePickerOpen.value = false }
 function save() { saveProject() }
 function open() { openFilePicker() }
 function exportSvg() { doExportSvg() }
-function toggleStoryboard() { uxState.storyboardMode = !uxState.storyboardMode }
+function toggleStoryboard() {
+  if (!uxState.storyboardMode && dataState.scenes.length === 0) {
+    captureScene()
+  }
+  uxState.storyboardMode = !uxState.storyboardMode
+}
 function onNewScene() { newScene() }
 function onCaptureScene() { captureScene() }
 </script>
@@ -294,6 +300,11 @@ function onCaptureScene() { captureScene() }
 .tool-icon {
   font-style: normal;
   line-height: 1;
+}
+
+.about-btn {
+  font-size: 16px;
+  font-weight: 600;
 }
 
 /* Mobile tool trigger — hidden on desktop */

@@ -25,7 +25,20 @@ const defaults = {
   showTimelineOnLoad: false,
   timelineOpen: false,
   sessionBg: '',  // overrides project.background for this tab session
+  perspectiveGuide: {
+    enabled: false,
+    mode: '2pt',        // '1pt' | '2pt' | '3pt'
+    opacity: 0.35,
+    color: '#ff9800',   // amber — distinct from blue snap/align guides
+    vps: [
+      { x: 320,  y: 360 },   // VP0
+      { x: 960,  y: 360 },   // VP1 (2pt+)
+      { x: 640,  y: 1080 },  // VP2 (3pt — below canvas)
+    ],
+    draggingVpIndex: null,
+  },
   // transient — not persisted
+  showAbout: false,
   isPlaying: false,
   drawState: {
     active: false,
@@ -46,7 +59,7 @@ const defaults = {
   alignGuides: [],   // transient — [{ axis:'x'|'y', pos:number }]
 }
 
-const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap', 'forceTangency', 'storyboardZoom', 'deleteBehavior', 'propsPanelWidth', 'invertScrollZoom', 'showTimelineOnLoad']
+const PERSIST_KEYS = ['pixelsPerFrame', 'canvasZoom', 'canvasOffset', 'timelinePanelHeight', 'isLooping', 'grid', 'pointSnap', 'autoGroupOnSnap', 'forceTangency', 'storyboardZoom', 'deleteBehavior', 'propsPanelWidth', 'invertScrollZoom', 'showTimelineOnLoad', 'perspectiveGuide']
 
 function loadPersisted() {
   try {

@@ -16,6 +16,7 @@
     />
     <PropertiesPanel />
     <TimelinePanel />
+    <AboutModal />
   </div>
 </template>
 
@@ -26,6 +27,7 @@ import PropertiesPanel from './PropertiesPanel.vue'
 import SvgCanvas from '../canvas/SvgCanvas.vue'
 import StoryboardCanvas from '../canvas/StoryboardCanvas.vue'
 import TimelinePanel from '../timeline/TimelinePanel.vue'
+import AboutModal from './AboutModal.vue'
 import uxState from '../../stores/uxState.js'
 
 const TOGGLE_H = 28
