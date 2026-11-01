@@ -12,6 +12,7 @@ import { generateId } from '../utils/idgen.js'
 import { undo, redo, recordSnapshot } from './useHistory.js'
 import { saveProject } from './usePersistence.js'
 import { cancelPen, penState } from './usePen.js'
+import { captureScene } from '../stores/sceneStore.js'
 
 export function useKeyboardShortcuts() {
   function deleteSelected() {
@@ -117,8 +118,10 @@ export function useKeyboardShortcuts() {
       case 'b': case 'B': setTool('pen'); break
       case 'c': case 'C': if (!e.ctrlKey && !e.metaKey) setTool('snapshot'); break
       case 'm': case 'M':
-        if (!e.ctrlKey && !e.metaKey && !uxState.activeSceneId)
+        if (!e.ctrlKey && !e.metaKey && !uxState.activeSceneId) {
+          if (!uxState.storyboardMode && dataState.scenes.length === 0) captureScene()
           uxState.storyboardMode = !uxState.storyboardMode
+        }
         break
       case 'Delete': case 'Backspace': deleteSelected(); break
       case 'Escape':

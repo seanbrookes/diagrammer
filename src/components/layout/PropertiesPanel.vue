@@ -61,11 +61,12 @@
       </section>
 
       <!-- Fill / Stroke -->
-      <section class="prop-section" v-if="el.fill !== undefined && el.fill !== 'none'">
+      <section class="prop-section" v-if="el.fill !== undefined && (el.fill !== 'none' || (el.type === 'pen' && el.closed))">
         <div class="prop-row">
           <label>Fill</label>
-          <input type="color" :value="el.fill" @mousedown="onLiveInputStart" @input="patch({ fill: $event.target.value }, true)" />
-          <span class="color-hex">{{ el.fill }}</span>
+          <input type="color" :value="el.fill === 'none' ? '#000000' : el.fill" @mousedown="onLiveInputStart" @input="patch({ fill: $event.target.value }, true)" />
+          <span class="color-hex">{{ el.fill === 'none' ? 'none' : el.fill }}</span>
+          <button v-if="el.fill !== 'none' && el.type === 'pen'" class="mini-btn" title="Remove fill" @click="patch({ fill: 'none' })">×</button>
         </div>
       </section>
 
@@ -258,6 +259,45 @@
         </div>
       </section>
 
+      <div class="panel-title">Perspective</div>
+
+      <section class="prop-section">
+        <div class="prop-row">
+          <label>Guides</label>
+          <input type="checkbox"
+            :checked="perspGuide.enabled"
+            @change="perspGuide.enabled = $event.target.checked" />
+          <span class="toggle-label">Show</span>
+        </div>
+        <div class="prop-row" :style="{ opacity: perspGuide.enabled ? 1 : 0.4 }">
+          <label>Mode</label>
+          <div class="seg-group">
+            <button class="seg-btn" :class="{ active: perspGuide.mode === '1pt' }"
+                    @click="perspGuide.mode = '1pt'">1-pt</button>
+            <button class="seg-btn" :class="{ active: perspGuide.mode === '2pt' }"
+                    @click="perspGuide.mode = '2pt'">2-pt</button>
+            <button class="seg-btn" :class="{ active: perspGuide.mode === '3pt' }"
+                    @click="perspGuide.mode = '3pt'">3-pt</button>
+          </div>
+        </div>
+        <div class="prop-row" :style="{ opacity: perspGuide.enabled ? 1 : 0.4 }">
+          <label>Color</label>
+          <input type="color" :value="perspGuide.color"
+            @input="perspGuide.color = $event.target.value" />
+          <span class="color-hex">{{ perspGuide.color }}</span>
+        </div>
+        <div class="prop-row" :style="{ opacity: perspGuide.enabled ? 1 : 0.4 }">
+          <label>Opacity</label>
+          <input type="range" min="0.05" max="1" step="0.05"
+            :value="perspGuide.opacity"
+            @input="perspGuide.opacity = +$event.target.value" />
+          <span class="color-hex">{{ Math.round(perspGuide.opacity * 100) }}%</span>
+        </div>
+        <div class="prop-row" :style="{ opacity: perspGuide.enabled ? 1 : 0.4 }">
+          <button class="add-kf-btn" @click="resetVps">Reset VPs</button>
+        </div>
+      </section>
+
       <section class="prop-section">
         <div class="prop-row">
           <label>Zoom</label>
@@ -298,6 +338,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import uxState from '../../stores/uxState.js'
+import { perspGuide } from '../../composables/usePerspectiveGuide.js'
 import dataState, {
   updateElement, updateProject, addKeyframe,
   bringForward as bringFwd, sendBackward as sendBwd,
@@ -357,14 +398,16 @@ function onLiveInputStart() {
 }
 
 function patch(p, isLive = false) {
-  if (!primaryId.value) return
+  if (!uxState.selectedIds.length) return
   if (isLive) {
     if (!_liveSnapshotDone) { recordSnapshot(); _liveSnapshotDone = true }
   } else {
     recordSnapshot()
   }
-  updateElement(primaryId.value, p)
-  syncProxyToElement(primaryId.value)
+  uxState.selectedIds.forEach(id => {
+    updateElement(id, p)
+    syncProxyToElement(id)
+  })
 }
 
 function patchProject(p) {
@@ -412,6 +455,14 @@ function bringForward(id) { bringFwd(id) }
 function sendBackward(id) { sendBwd(id) }
 function group() { groupElements(uxState.selectedIds) }
 function ungroup() { ungroupElements(uxState.selectedIds) }
+
+function resetVps() {
+  const W = project.value.canvasWidth
+  const H = project.value.canvasHeight
+  perspGuide.vps[0] = { x: W * 0.25, y: H * 0.5 }
+  perspGuide.vps[1] = { x: W * 0.75, y: H * 0.5 }
+  perspGuide.vps[2] = { x: W * 0.5,  y: H * 1.5 }
+}
 
 const sizePresets = [
   { label: '16:9 HD', w: 1280, h: 720 },

@@ -47,6 +47,7 @@
         cursor: cursorStyle,
         display: 'block',
         touchAction: 'none',
+        overflow: 'visible',
       }"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
@@ -82,6 +83,9 @@
         :width="project.canvasWidth" :height="project.canvasHeight"
         fill="url(#canvas-grid)" pointer-events="none"
       />
+
+      <!-- Perspective guide overlay — behind all artwork -->
+      <PerspectiveGuideOverlay />
 
       <!-- Elements rendered from GSAP-driven proxies -->
       <ElementRenderer
@@ -189,6 +193,8 @@ import { clearSelection } from '../../stores/uxState.js'
 import { snapIndicator } from '../../utils/snapPoints.js'
 import { useSnapshot, snapshotRect } from '../../composables/useSnapshot.js'
 import { exitSceneEdit, enterSceneEdit, captureToast, sceneLabel } from '../../stores/sceneStore.js'
+import { startVpDrag, moveVpDrag, endVpDrag } from '../../composables/usePerspectiveGuide.js'
+import PerspectiveGuideOverlay from './PerspectiveGuideOverlay.vue'
 
 const svgRef = ref(null)
 const containerRef = ref(null)
@@ -202,7 +208,8 @@ let _panScrollLeft = 0, _panScrollTop = 0
 function isCanvasBackground(target) {
   return !target?.closest?.('[data-id]') &&
          !target?.dataset?.handle &&
-         !target?.dataset?.penHandle
+         !target?.dataset?.penHandle &&
+         !target?.closest?.('[data-vp-index]')
 }
 
 function onContextMenu(event) {
@@ -405,6 +412,11 @@ function getSvgPoint(event) {
 
 function onMouseDown(event) {
   const pt = getSvgPoint(event)
+  const vpEl = event.target?.closest?.('[data-vp-index]')
+  if (vpEl !== null && vpEl !== undefined && uxState.perspectiveGuide.enabled) {
+    startVpDrag(Number(vpEl.dataset.vpIndex), pt)
+    return
+  }
   if (activeTool.value === 'snapshot') {
     snapDown(pt)
   } else if (activeTool.value === 'pen') {
@@ -430,6 +442,10 @@ function onMouseDown(event) {
 }
 
 function onMouseMove(event) {
+  if (uxState.perspectiveGuide.draggingVpIndex !== null) {
+    moveVpDrag(getSvgPoint(event))
+    return
+  }
   if (panning.value) {
     const c = containerRef.value
     if (c) {
@@ -451,6 +467,7 @@ function onMouseMove(event) {
 }
 
 function onMouseUp() {
+  if (uxState.perspectiveGuide.draggingVpIndex !== null) { endVpDrag(); return }
   if (panning.value) { panning.value = false; return }
   if (snapshotRect.active) {
     snapUp()
